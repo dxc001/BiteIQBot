@@ -1,43 +1,58 @@
+# --- Gevent patch must be FIRST for Render compatibility ---
+from gevent import monkey
+monkey.patch_all()
+
+# --- Standard imports ---
+import asyncio
+import logging
 from flask import Flask, request, jsonify
+
+# --- Internal modules ---
 from database import Database
 from openai_handler import OpenAIHandler
 from stripe_handler import StripeHandler
 from telegram_bot import TelegramBot
 from scheduler import ReminderScheduler
 from config import PORT, DEBUG, WEBHOOK_URL
-import logging
-from gevent import monkey
-monkey.patch_all()
-import asyncio
 
+# --- Logging setup ---
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
+# --- Flask app setup ---
 app = Flask(__name__)
 
+# --- Initialize core components ---
 db = Database()
 openai_handler = OpenAIHandler(db)
 stripe_handler = StripeHandler(db)
 telegram_bot = TelegramBot(db, openai_handler, stripe_handler)
 scheduler = ReminderScheduler(db, openai_handler)
 
+
+# --- Bot initialization on startup ---
 @app.before_first_request
 def initialize_bot():
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(telegram_bot.initialize())
+
         webhook_url = f"{WEBHOOK_URL}/webhook"
         loop.run_until_complete(telegram_bot.application.bot.set_webhook(webhook_url))
-        logger.info(f"Telegram webhook set to: {webhook_url}")
-        scheduler.start()
-        logger.info("Scheduler started")
-    except Exception as e:
-        logger.error(f"Failed to initialize bot: {e}")
+        logger.info(f"✅ Telegram webhook set to: {webhook_url}")
 
+        scheduler.start()
+        logger.info("⏰ Reminder scheduler started")
+
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize bot: {e}")
+
+
+# --- Health & status endpoints ---
 @app.route('/')
 def index():
     return jsonify({
@@ -46,25 +61,33 @@ def index():
         'version': '1.0.0'
     })
 
+
 @app.route('/health')
 def health_check():
     return jsonify({'status': 'healthy'}), 200
 
+
+# --- Telegram webhook endpoint ---
 @app.route('/webhook', methods=['POST'])
 def telegram_webhook():
     try:
         json_data = request.get_json()
         from telegram import Update
         update = Update.de_json(json_data, telegram_bot.application.bot)
+
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(telegram_bot.application.process_update(update))
         loop.close()
+
         return jsonify({'status': 'ok'}), 200
+
     except Exception as e:
         logger.error(f"Error processing Telegram webhook: {e}")
         return jsonify({'error': str(e)}), 500
 
+
+# --- Stripe webhook endpoint ---
 @app.route('/stripe-webhook', methods=['POST'])
 def stripe_webhook():
     payload = request.data
@@ -72,7 +95,7 @@ def stripe_webhook():
 
     try:
         result = stripe_handler.handle_webhook_event(payload, sig_header)
-        logger.info(f"Stripe webhook processed: {result}")
+        logger.info(f"✅ Stripe webhook processed: {result}")
         return jsonify(result), 200
     except ValueError as e:
         logger.error(f"Stripe webhook error: {e}")
@@ -81,6 +104,8 @@ def stripe_webhook():
         logger.error(f"Unexpected error in Stripe webhook: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
+
+# --- Payment success page ---
 @app.route('/payment-success')
 def payment_success():
     return """
@@ -118,6 +143,8 @@ def payment_success():
     </html>
     """
 
+
+# --- Payment cancelled page ---
 @app.route('/payment-cancelled')
 def payment_cancelled():
     return """
@@ -155,7 +182,10 @@ def payment_cancelled():
     </html>
     """
 
+
+# --- Start app ---
 if __name__ == '__main__':
-    logger.info("Starting BiteIQBot application...")
-    logger.info(f"Starting Flask server on port {PORT}")
+    logger.info("🚀 Starting BiteIQBot application...")
+    logger.info(f"🌐 Running Flask server on port {PORT}")
     app.run(host='0.0.0.0', port=PORT, debug=DEBUG)
+

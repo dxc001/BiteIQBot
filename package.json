@@ -1,0 +1,9 @@
+{
+  "name": "biteiqbot",
+  "private": true,
+  "scripts": {
+    "start": "python3 app.py",
+    "dev": "python3 app.py",
+    "build": "echo 'Python dependencies will be installed at deployment time'"
+  }
+}

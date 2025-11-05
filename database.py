@@ -4,65 +4,76 @@ from datetime import datetime, date, timedelta
 from config import SUPABASE_URL, SUPABASE_SERVICE_KEY
 import json
 import logging
-
-# 🧩 Patch for Supabase + httpx proxy bug
 import httpx
+
+# 🧩 Patch for Supabase + httpx proxy bug (Render-safe)
 _original_client_init = httpx.Client.__init__
 def _safe_init(self, *args, **kwargs):
-    # remove invalid 'proxy' argument that some supabase/gotrue versions still pass
     kwargs.pop("proxy", None)
     return _original_client_init(self, *args, **kwargs)
 httpx.Client.__init__ = _safe_init
 
 logger = logging.getLogger(__name__)
 
+
 class Database:
     def __init__(self):
         if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-            raise ValueError(
-                "❌ Supabase configuration missing. Please set SUPABASE_URL and SUPABASE_SERVICE_KEY in Render environment."
-            )
+            raise ValueError("❌ Missing SUPABASE_URL or SUPABASE_SERVICE_KEY in environment variables.")
         self.client: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
         logger.info("✅ Connected to Supabase successfully")
 
-
     # ------------------ User Management ------------------ #
-def get_or_create_user(self, telegram_id: int, username: str = None, first_name: str = None) -> Dict[str, Any]:
-    """Retrieve user or create a new one if missing."""
-    try:
-        response = (
-            self.client.table('users')
-            .select('*')
-            .eq('telegram_id', telegram_id)
-            .maybe_single()
-            .execute()
-        )
+    def get_or_create_user(self, telegram_id: int, username: str = None, first_name: str = None) -> Dict[str, Any]:
+        """Retrieve user or create a new one if missing."""
+        try:
+            response = (
+                self.client.table('users')
+                .select('*')
+                .eq('telegram_id', telegram_id)
+                .maybe_single()
+                .execute()
+            )
 
-        # 🧠 Defensive check — Supabase may return None if 406 or empty
-        if not response or not getattr(response, "data", None):
-            logger.warning(f"⚠️ No user found for telegram_id={telegram_id}, creating one...")
-            new_user = {
-                'telegram_id': telegram_id,
-                'username': username,
-                'first_name': first_name,
-                'created_at': datetime.now().isoformat(),
+            if not response or not getattr(response, "data", None):
+                logger.warning(f"⚠️ No user found for telegram_id={telegram_id}, creating one...")
+                new_user = {
+                    'telegram_id': telegram_id,
+                    'username': username,
+                    'first_name': first_name,
+                    'created_at': datetime.now().isoformat(),
+                    'last_active': datetime.now().isoformat(),
+                    'reminders': False
+                }
+                insert_response = self.client.table('users').insert(new_user).execute()
+                logger.info(f"✅ Created new user for Telegram ID {telegram_id}")
+                return insert_response.data[0] if insert_response and insert_response.data else new_user
+
+            # ✅ Update last_active timestamp for existing user
+            self.client.table('users').update({
                 'last_active': datetime.now().isoformat()
-            }
-            insert_response = self.client.table('users').insert(new_user).execute()
-            logger.info(f"✅ Created new user for Telegram ID {telegram_id}")
-            return insert_response.data[0] if insert_response and insert_response.data else new_user
+            }).eq('telegram_id', telegram_id).execute()
 
-        # ✅ User exists — update last_active timestamp
-        self.client.table('users').update({
-            'last_active': datetime.now().isoformat()
-        }).eq('telegram_id', telegram_id).execute()
+            return response.data
 
-        return response.data
+        except Exception as e:
+            logger.error(f"❌ Error in get_or_create_user: {e}")
+            return {}
 
-    except Exception as e:
-        logger.error(f"❌ Error in get_or_create_user: {e}")
-        return {}
-
+    def get_user(self, telegram_id: int) -> Optional[Dict[str, Any]]:
+        """Get user profile by Telegram ID."""
+        try:
+            response = (
+                self.client.table('users')
+                .select('*')
+                .eq('telegram_id', telegram_id)
+                .maybe_single()
+                .execute()
+            )
+            return response.data
+        except Exception as e:
+            logger.error(f"❌ Error fetching user: {e}")
+            return None
 
     # ------------------ Profile ------------------ #
     def upsert_user_profile(self, telegram_id: int, name: str, age: int, gender: str,

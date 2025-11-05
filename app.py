@@ -79,18 +79,23 @@ def telegram_webhook():
         from telegram import Update
         update = Update.de_json(request.get_json(force=True), telegram_bot.application.bot)
 
-        # Debug: show received update type
+        # Log the incoming update for debugging
         logger.info(f"📩 Incoming update: {update.to_dict()}")
 
-        # Run async handler safely
-        asyncio.run(telegram_bot.application.process_update(update))
-        return "OK", 200
+        # ✅ Process asynchronously — don't block Flask response
+        import threading
+        threading.Thread(
+            target=lambda: asyncio.run(telegram_bot.application.process_update(update))
+        ).start()
+
+        return "OK", 200  # respond immediately to Telegram
 
     except Exception as e:
         import traceback
         tb = traceback.format_exc()
         logger.error(f"❌ Error processing Telegram webhook: {e}\n{tb}")
         return "ERROR", 500
+
 
 
 

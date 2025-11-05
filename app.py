@@ -79,14 +79,19 @@ def telegram_webhook():
         from telegram import Update
         update = Update.de_json(request.get_json(force=True), telegram_bot.application.bot)
 
-        # ✅ Correct async handling for PTB 20.6+
-        asyncio.run(telegram_bot.application.process_update(update))
+        # Debug: show received update type
+        logger.info(f"📩 Incoming update: {update.to_dict()}")
 
+        # Run async handler safely
+        asyncio.run(telegram_bot.application.process_update(update))
         return "OK", 200
 
     except Exception as e:
-        logger.error(f"Error processing Telegram webhook: {e}")
+        import traceback
+        tb = traceback.format_exc()
+        logger.error(f"❌ Error processing Telegram webhook: {e}\n{tb}")
         return "ERROR", 500
+
 
 
 # --- Stripe webhook endpoint ---

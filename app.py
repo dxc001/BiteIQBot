@@ -34,22 +34,27 @@ scheduler = ReminderScheduler(db, openai_handler)
 
 
 # --- Bot initialization on startup ---
-@app.before_first_request
-def initialize_bot():
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(telegram_bot.initialize())
+@app.before_request
+def initialize_bot_once():
+    if not hasattr(app, "_bot_initialized"):
+        app._bot_initialized = True
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(telegram_bot.initialize())
 
-        webhook_url = f"{WEBHOOK_URL}/webhook"
-        loop.run_until_complete(telegram_bot.application.bot.set_webhook(webhook_url))
-        logger.info(f"✅ Telegram webhook set to: {webhook_url}")
+            webhook_url = f"{WEBHOOK_URL}/webhook"
+            loop.run_until_complete(
+                telegram_bot.application.bot.set_webhook(webhook_url)
+            )
+            logger.info(f"✅ Telegram webhook set to: {webhook_url}")
 
-        scheduler.start()
-        logger.info("⏰ Reminder scheduler started")
+            scheduler.start()
+            logger.info("⏰ Reminder scheduler started")
 
-    except Exception as e:
-        logger.error(f"❌ Failed to initialize bot: {e}")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize bot: {e}")
+
 
 
 # --- Health & status endpoints ---

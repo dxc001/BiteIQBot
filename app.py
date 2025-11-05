@@ -79,16 +79,24 @@ def telegram_webhook():
         from telegram import Update
         update = Update.de_json(request.get_json(force=True), telegram_bot.application.bot)
 
-        # Log the incoming update for debugging
         logger.info(f"📩 Incoming update: {update.to_dict()}")
 
-        # ✅ Process asynchronously — don't block Flask response
-        import threading
-        threading.Thread(
-            target=lambda: asyncio.run(telegram_bot.application.process_update(update))
-        ).start()
+        # ✅ Use existing event loop from the bot application safely
+        import asyncio
+        loop = telegram_bot.application.loop
+        if loop and loop.is_running():
+            asyncio.run_coroutine_threadsafe(
+                telegram_bot.application.process_update(update),
+                loop
+            )
+        else:
+            # fallback — create a new loop if app not started yet
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            new_loop.run_until_complete(telegram_bot.application.process_update(update))
+            new_loop.close()
 
-        return "OK", 200  # respond immediately to Telegram
+        return "OK", 200
 
     except Exception as e:
         import traceback

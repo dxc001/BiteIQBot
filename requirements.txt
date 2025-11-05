@@ -10,9 +10,11 @@ python-dotenv==1.0.1
 requests==2.32.3
 Werkzeug==3.1.3
 
-# Clean supabase stack
+# Supabase stack pinned to correct matching versions
 supabase==2.4.0
+gotrue==2.10.0
 httpx==0.25.1
+
 
 
 

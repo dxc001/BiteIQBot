@@ -5,14 +5,26 @@ from config import SUPABASE_URL, SUPABASE_SERVICE_KEY
 import json
 import logging
 
+# 🧩 Patch for Supabase + httpx proxy bug
+import httpx
+_original_client_init = httpx.Client.__init__
+def _safe_init(self, *args, **kwargs):
+    # remove invalid 'proxy' argument that some supabase/gotrue versions still pass
+    kwargs.pop("proxy", None)
+    return _original_client_init(self, *args, **kwargs)
+httpx.Client.__init__ = _safe_init
+
 logger = logging.getLogger(__name__)
 
 class Database:
     def __init__(self):
         if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-            raise ValueError("❌ Supabase configuration missing. Please set SUPABASE_URL and SUPABASE_SERVICE_KEY in Render environment.")
+            raise ValueError(
+                "❌ Supabase configuration missing. Please set SUPABASE_URL and SUPABASE_SERVICE_KEY in Render environment."
+            )
         self.client: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
         logger.info("✅ Connected to Supabase successfully")
+
 
     # ------------------ User Management ------------------ #
     def get_or_create_user(self, telegram_id: int, username: str = None, first_name: str = None) -> Dict[str, Any]:

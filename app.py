@@ -73,10 +73,10 @@ def health_check():
 
 
 # --- Telegram webhook endpoint ---
-@app.route('/webhook', methods=['POST'])
+@app.post("/webhook")
 def telegram_webhook():
     try:
-        json_data = request.get_json()
+        json_data = request.get_json(force=True)
         from telegram import Update
         update = Update.de_json(json_data, telegram_bot.application.bot)
 
@@ -85,11 +85,11 @@ def telegram_webhook():
         loop.run_until_complete(telegram_bot.application.process_update(update))
         loop.close()
 
-        return jsonify({'status': 'ok'}), 200
+        return "OK", 200
 
     except Exception as e:
         logger.error(f"Error processing Telegram webhook: {e}")
-        return jsonify({'error': str(e)}), 500
+        return "ERROR", 500
 
 
 # --- Stripe webhook endpoint ---

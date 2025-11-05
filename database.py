@@ -27,15 +27,20 @@ class Database:
 
 
     # ------------------ User Management ------------------ #
-    def get_or_create_user(self, telegram_id: int, username: str = None, first_name: str = None) -> Dict[str, Any]:
-        """Retrieve user or create a new one if missing."""
-        response = self.client.table('users').select('*').eq('telegram_id', telegram_id).maybe_single().execute()
-        if response.data:
-            self.client.table('users').update({
-                'last_active': datetime.now().isoformat()
-            }).eq('telegram_id', telegram_id).execute()
-            return response.data
-        else:
+def get_or_create_user(self, telegram_id: int, username: str = None, first_name: str = None) -> Dict[str, Any]:
+    """Retrieve user or create a new one if missing."""
+    try:
+        response = (
+            self.client.table('users')
+            .select('*')
+            .eq('telegram_id', telegram_id)
+            .maybe_single()
+            .execute()
+        )
+
+        # 🧠 Defensive check — Supabase may return None if 406 or empty
+        if not response or not getattr(response, "data", None):
+            logger.warning(f"⚠️ No user found for telegram_id={telegram_id}, creating one...")
             new_user = {
                 'telegram_id': telegram_id,
                 'username': username,
@@ -43,18 +48,21 @@ class Database:
                 'created_at': datetime.now().isoformat(),
                 'last_active': datetime.now().isoformat()
             }
-            response = self.client.table('users').insert(new_user).execute()
-            return response.data[0]
+            insert_response = self.client.table('users').insert(new_user).execute()
+            logger.info(f"✅ Created new user for Telegram ID {telegram_id}")
+            return insert_response.data[0] if insert_response and insert_response.data else new_user
 
-    def get_user(self, telegram_id: int) -> Optional[Dict[str, Any]]:
-        """Get user profile by Telegram ID."""
-        response = self.client.table('users').select('*').eq('telegram_id', telegram_id).maybe_single().execute()
+        # ✅ User exists — update last_active timestamp
+        self.client.table('users').update({
+            'last_active': datetime.now().isoformat()
+        }).eq('telegram_id', telegram_id).execute()
+
         return response.data
 
-    def get_all_users(self) -> List[Dict[str, Any]]:
-        """Retrieve all users."""
-        response = self.client.table('users').select('*').execute()
-        return response.data or []
+    except Exception as e:
+        logger.error(f"❌ Error in get_or_create_user: {e}")
+        return {}
+
 
     # ------------------ Profile ------------------ #
     def upsert_user_profile(self, telegram_id: int, name: str, age: int, gender: str,

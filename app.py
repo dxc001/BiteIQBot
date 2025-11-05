@@ -79,11 +79,8 @@ def telegram_webhook():
         from telegram import Update
         update = Update.de_json(request.get_json(force=True), telegram_bot.application.bot)
 
-        # ✅ Use the existing event loop from the running Application
-        asyncio.run_coroutine_threadsafe(
-            telegram_bot.application.process_update(update),
-            telegram_bot.application.loop
-        )
+        # ✅ Correct async handling for PTB 20.6+
+        asyncio.run(telegram_bot.application.process_update(update))
 
         return "OK", 200
 

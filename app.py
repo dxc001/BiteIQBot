@@ -76,14 +76,14 @@ def health_check():
 @app.post("/webhook")
 def telegram_webhook():
     try:
-        json_data = request.get_json(force=True)
         from telegram import Update
-        update = Update.de_json(json_data, telegram_bot.application.bot)
+        update = Update.de_json(request.get_json(force=True), telegram_bot.application.bot)
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(telegram_bot.application.process_update(update))
-        loop.close()
+        # ✅ Use the existing event loop from the running Application
+        asyncio.run_coroutine_threadsafe(
+            telegram_bot.application.process_update(update),
+            telegram_bot.application.loop
+        )
 
         return "OK", 200
 

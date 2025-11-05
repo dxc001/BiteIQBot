@@ -10,13 +10,12 @@ python-dotenv==1.0.1
 requests==2.32.3
 Werkzeug==3.1.3
 
-# Supabase compatible stack
-supabase==2.0.3
-gotrue==1.3.1
-postgrest==0.13.1
-realtime==1.0.0
-storage3==0.6.1
-supafunc==0.2.2
+# Supabase SDK (handles gotrue/realtime internally)
+supabase==2.4.0
+
+# Explicit httpx version that satisfies all dependencies
+httpx==0.24.1
+
 
 
 

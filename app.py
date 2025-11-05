@@ -190,7 +190,12 @@ def payment_cancelled():
 
 # --- Start app ---
 if __name__ == '__main__':
+    import os
+    PORT = int(os.environ.get("PORT", 8080))  # fallback for local runs
+    DEBUG = os.environ.get("DEBUG", "False").lower() == "true"
+
     logger.info("🚀 Starting BiteIQBot application...")
     logger.info(f"🌐 Running Flask server on port {PORT}")
     app.run(host='0.0.0.0', port=PORT, debug=DEBUG)
+
 

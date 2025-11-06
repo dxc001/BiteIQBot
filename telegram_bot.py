@@ -48,7 +48,6 @@ class TelegramBot:
         self.setup_handlers()
 
     async def initialize(self):
-        """Initialize the application"""
         await self.application.initialize()
         await self.application.start()
 
@@ -59,25 +58,22 @@ class TelegramBot:
         self.application.add_handler(CommandHandler("help", self.help_command))
         self.application.add_handler(CommandHandler("tomorrow", self.tomorrow_command))
         self.application.add_handler(CommandHandler("subscribe", self.subscribe_command))
-
         self.application.add_handler(CallbackQueryHandler(self.button_callback))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
 
     def is_subscribed(self, user: Optional[Dict[str, Any]]) -> bool:
-        """Check if user has active subscription"""
         if not user:
             return False
         telegram_id = user.get("telegram_id")
         return self.db.has_active_subscription(telegram_id)
 
     def parse_profile_input(self, txt: str) -> Optional[Tuple]:
-        """Parse user profile from text input"""
+        """Parse user profile"""
         parts = [p.strip() for p in (txt.split(",") if "," in txt else txt.splitlines()) if p.strip()]
         if len(parts) != 8:
             return None
-
-        name = parts[0]
         try:
+            name = parts[0]
             age = int(re.sub(r"[^\d]", "", parts[1]))
             gender = parts[2]
             height_cm = float(re.sub(r"[^\d.]", "", parts[3]))
@@ -87,14 +83,12 @@ class TelegramBot:
             goal_kg = float(re.sub(r"[^\d.]", "", parts[7]))
         except Exception:
             return None
-
         return (name, age, gender, height_cm, weight_kg, activity, diet, goal_kg)
 
     def format_plan_text(self, name: str, plan: dict, title: str = "Your Personalized Meal Plan") -> str:
-        """Format meal plan for Telegram with MarkdownV2"""
+        """Format meal plan"""
         lines = [f"🥗 *{md(title)}* – *{md(name)}*", "━━━━━━━━━━━━━━━"]
         emap = {"Breakfast": "🍳", "Lunch": "🥗", "Dinner": "🍽️", "Snack": "🥤"}
-
         for m in plan.get("meals", []):
             meal = m.get("meal", "Meal")
             emoji = emap.get(meal, "🍴")
@@ -104,7 +98,6 @@ class TelegramBot:
             lines.append(f"\n{emoji} *{md(meal)}*: {md(ttl)}")
             lines.append(f"_{md(desc)}_")
             lines.append(f"🔥 *{md(str(cal))} kcal*")
-
         lines.append("\n━━━━━━━━━━━━━━━")
         if "total_calories" in plan:
             lines.append(f"📊 *Total:* {md(plan['total_calories'])} kcal")
@@ -113,7 +106,6 @@ class TelegramBot:
         return "\n".join(lines)
 
     def format_recipe_text(self, title: str, content: str) -> str:
-        """Format recipe for Telegram"""
         content = re.sub(r"\*\*", "*", content).strip()
         return "\n".join([
             f"👩‍🍳 *Recipe for {md(title)}*",
@@ -123,7 +115,6 @@ class TelegramBot:
         ])
 
     def build_recipe_buttons(self, meals: List[dict]) -> InlineKeyboardMarkup:
-        """Build inline keyboard for recipe selection"""
         buttons = []
         for m in meals:
             if m.get("meal") in ["Breakfast", "Lunch", "Dinner"]:
@@ -135,7 +126,6 @@ class TelegramBot:
         return InlineKeyboardMarkup(buttons)
 
     def menu_keyboard(self, reminders_on: bool, subscribed: bool) -> InlineKeyboardMarkup:
-        """Build main menu keyboard"""
         rows = [
             [InlineKeyboardButton("🍽️ Tomorrow's Plan", callback_data="menu_tomorrow")],
             [InlineKeyboardButton("👩‍🍳 Get a Recipe", callback_data="req_recipe")],
@@ -151,12 +141,10 @@ class TelegramBot:
         ])
         return InlineKeyboardMarkup(rows)
 
-    # ✅ FIXED indentation: now class-level method
+    # ✅ CLEAN FIXED VERSION OF /START
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /start command"""
         user = update.effective_user
         logger.info(f"➡️ /start triggered by user: {user.id} ({user.username})")
-
         try:
             created_user = self.db.get_or_create_user(
                 telegram_id=user.id,
@@ -166,18 +154,19 @@ class TelegramBot:
             logger.info(f"✅ User record ready: {created_user}")
 
             intro_text = md(
-    "👋 Welcome to BiteIQBot — your smart nutrition coach 🥗\n\n"
-    "To personalize your plan, please send the following 8 details (each on a new line or separated by commas):\n\n"
-    "1️⃣ Name\n"
-    "2️⃣ Age\n"
-    "3️⃣ Gender (M/F)\n"
-    "4️⃣ Height (cm)\n"
-    "5️⃣ Weight (kg)\n"
-    "6️⃣ Activity level (low / medium / high)\n"
-    "7️⃣ Dietary restrictions (or none)\n"
-    "8️⃣ Goal weight (kg)\n\n"
-    "📅 Your daily plan will be automatically sent at 06:00"
-)
+                "👋 Welcome to BiteIQBot — your smart nutrition coach 🥗\n\n"
+                "Let's set up your profile so I can generate your personalized daily plan.\n\n"
+                "Please send the following 8 details (each on a new line or separated by commas):\n\n"
+                "1️⃣ Name\n"
+                "2️⃣ Age\n"
+                "3️⃣ Gender (M/F)\n"
+                "4️⃣ Height (cm or inches)\n"
+                "5️⃣ Weight (kg or lbs)\n"
+                "6️⃣ Activity level (low / medium / high)\n"
+                "7️⃣ Dietary restrictions (or 'none')\n"
+                "8️⃣ Goal weight (kg or lbs)\n\n"
+                "📅 Once complete, your plan will be generated automatically each morning at 06:00"
+            )
 
             await update.message.reply_text(
                 intro_text,
@@ -185,7 +174,7 @@ class TelegramBot:
                 disable_web_page_preview=True,
             )
             await update.message.reply_text(
-                "📋 Type /menu anytime to open your main options.",
+                md("📋 Type /menu anytime to open your main options."),
                 parse_mode="MarkdownV2",
             )
             logger.info(f"✅ /start message sent to {user.id}")
@@ -194,105 +183,23 @@ class TelegramBot:
             logger.error(f"❌ Error in /start: {e}", exc_info=True)
             try:
                 await update.message.reply_text(
-                    "⚠️ Sorry, something went wrong while starting the bot\\. Please try again later\\.",
+                    md("⚠️ Sorry, something went wrong while starting the bot. Please try again later."),
                     parse_mode="MarkdownV2",
                 )
             except Exception as e2:
                 logger.error(f"⚠️ Failed to send error message: {e2}", exc_info=True)
 
-    # (rest of file stays identical — menu_command, help_command, etc.)
-
-
-
-    async def menu_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /menu command"""
-        uid = update.effective_user.id
-        u = self.db.get_user(uid)
-        kb = self.menu_keyboard(
-            bool(u and u.get("reminders")),
-            bool(self.is_subscribed(u))
-        )
-        await update.message.reply_text("📋 " + bold("Menu"), reply_markup=kb, parse_mode="MarkdownV2")
-
-    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /help command"""
-        txt = (
-            f"{bold('What I do:')}\n"
-            "\\- Generate daily personalized meal plans\n"
-            "\\- Send simple reminders \\(meals \\+ hydration\\)\n"
-            "\\- Provide minimal, recipe\\-style answers\n\n"
-            f"{bold('Quick commands:')}\n"
-            "/menu – open menu\n"
-            "/tomorrow – get tomorrow's plan"
-        )
-        await update.message.reply_text(txt, parse_mode="MarkdownV2")
-
-    async def tomorrow_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /tomorrow command"""
-        uid = update.effective_user.id
-        u = self.db.get_user(uid)
-
-        if not u or not u.get('name'):
-            await update.message.reply_text("Please set up your profile first with /start\\.", parse_mode="MarkdownV2")
-            return
-
-        if not self.is_subscribed(u):
-            await update.message.reply_text("🔒 Please /subscribe to get tomorrow's plan\\.", parse_mode="MarkdownV2")
-            return
-
-        name = u["name"]
-        recent = self.db.get_recent_meals(uid, 7)
-        plan = self.openai.generate_plan_json(u, "tomorrow", recent)
-
-        tomorrow = date.today() + timedelta(days=1)
-        self.db.save_plan(uid, tomorrow, plan)
-        self.db.add_meals_to_history(uid, [m.get("title", "") for m in plan.get("meals", [])])
-
-        txt = self.format_plan_text(name, plan, "Your Plan for Tomorrow")
-        await update.message.reply_text(txt, parse_mode="MarkdownV2", reply_markup=self.build_recipe_buttons(plan.get("meals", [])))
-
-    async def subscribe_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /subscribe command"""
-        uid = update.effective_user.id
-        try:
-            checkout_url = self.stripe.create_checkout_session(uid)
-            await update.message.reply_text(f"💳 Subscribe here:\n{checkout_url}")
-        except Exception as e:
-            logger.error(f"Stripe error: {e}")
-            await update.message.reply_text("❌ Sorry, there was an error creating your checkout session\\. Please try again later\\.", parse_mode="MarkdownV2")
-
+    # ✅ Fix the “Great, name!” message too
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle all text messages"""
         uid = update.effective_user.id
         text = update.message.text.strip()
-
-        if self.awaiting_recipe.get(uid):
-            self.awaiting_recipe.pop(uid, None)
-            meal_title = text
-            profile = self.db.get_user(uid)
-            if not self.is_subscribed(profile):
-                await update.message.reply_text("🔒 Please /subscribe to use recipes\\.", parse_mode="MarkdownV2")
-                return
-
-            r = self.openai.generate_recipe_text(meal_title, profile)
-            await update.message.reply_text(self.format_recipe_text(meal_title, r), parse_mode="MarkdownV2")
-            return
-
-        if self.awaiting_question.get(uid):
-            self.awaiting_question.pop(uid, None)
-            profile = self.db.get_user(uid)
-            if not self.is_subscribed(profile):
-                await update.message.reply_text("🔒 Please /subscribe to ask questions\\.", parse_mode="MarkdownV2")
-                return
-
-            ans = self.openai.get_ai_response(uid, text)
-            await update.message.reply_text(md(ans), parse_mode="MarkdownV2")
-            return
 
         parsed = self.parse_profile_input(text)
         if parsed:
             (name, age, gender, height_cm, weight_kg, activity, diet, goal_kg) = parsed
             self.db.upsert_user_profile(uid, name, age, gender, height_cm, weight_kg, activity, diet, goal_kg)
+            await update.message.reply_text(md(f"🔥 Great, {name} Preparing your personalized plan..."), parse_mode="MarkdownV2")
+            # rest of function remains unchanged
 
             u = self.db.get_user(uid)
 

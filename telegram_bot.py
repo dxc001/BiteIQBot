@@ -34,6 +34,7 @@ def bold(text: Any) -> str:
     """Make text bold in MarkdownV2"""
     return f"*{md(text)}*"
 
+
 class TelegramBot:
     def __init__(self, db: Database, openai_handler: OpenAIHandler, stripe_handler: StripeHandler):
         self.db = db
@@ -60,14 +61,13 @@ class TelegramBot:
         self.application.add_handler(CommandHandler("subscribe", self.subscribe_command))
 
         self.application.add_handler(CallbackQueryHandler(self.button_callback))
-
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
 
     def is_subscribed(self, user: Optional[Dict[str, Any]]) -> bool:
         """Check if user has active subscription"""
         if not user:
             return False
-        telegram_id = user.get('telegram_id')
+        telegram_id = user.get("telegram_id")
         return self.db.has_active_subscription(telegram_id)
 
     def parse_profile_input(self, txt: str) -> Optional[Tuple]:
@@ -92,18 +92,15 @@ class TelegramBot:
 
     def format_plan_text(self, name: str, plan: dict, title: str = "Your Personalized Meal Plan") -> str:
         """Format meal plan for Telegram with MarkdownV2"""
-        lines = []
-        lines.append(f"🥗 *{md(title)}* – *{md(name)}*")
-        lines.append("━━━━━━━━━━━━━━━")
-
+        lines = [f"🥗 *{md(title)}* – *{md(name)}*", "━━━━━━━━━━━━━━━"]
         emap = {"Breakfast": "🍳", "Lunch": "🥗", "Dinner": "🍽️", "Snack": "🥤"}
+
         for m in plan.get("meals", []):
             meal = m.get("meal", "Meal")
             emoji = emap.get(meal, "🍴")
             ttl = m.get("title", "")
             desc = m.get("description", "")
             cal = m.get("calories", "")
-
             lines.append(f"\n{emoji} *{md(meal)}*: {md(ttl)}")
             lines.append(f"_{md(desc)}_")
             lines.append(f"🔥 *{md(str(cal))} kcal*")
@@ -113,18 +110,16 @@ class TelegramBot:
             lines.append(f"📊 *Total:* {md(plan['total_calories'])} kcal")
         if plan.get("tip"):
             lines.append(f"💡 *Tip:* {md(plan['tip'])}")
-
         return "\n".join(lines)
 
     def format_recipe_text(self, title: str, content: str) -> str:
         """Format recipe for Telegram"""
-        content = re.sub(r"\*\*", "*", content)
-        content = content.strip()
+        content = re.sub(r"\*\*", "*", content).strip()
         return "\n".join([
             f"👩‍🍳 *Recipe for {md(title)}*",
             "━━━━━━━━━━━━━━━",
             md(content),
-            "━━━━━━━━━━━━━━━"
+            "━━━━━━━━━━━━━━━",
         ])
 
     def build_recipe_buttons(self, meals: List[dict]) -> InlineKeyboardMarkup:
@@ -134,14 +129,9 @@ class TelegramBot:
             if m.get("meal") in ["Breakfast", "Lunch", "Dinner"]:
                 icon = {"Breakfast": "🍳", "Lunch": "🥗", "Dinner": "🍽️"}[m["meal"]]
                 title = m.get("title") or m["meal"]
-                buttons.append([InlineKeyboardButton(
-                    f"{icon} {m['meal']} Recipe",
-                    callback_data=f"recipe|{title}"
-                )])
-
+                buttons.append([InlineKeyboardButton(f"{icon} {m['meal']} Recipe", callback_data=f"recipe|{title}")])
         if not buttons:
             buttons.append([InlineKeyboardButton("👩‍🍳 Get a Recipe", callback_data="req_recipe")])
-
         return InlineKeyboardMarkup(buttons)
 
     def menu_keyboard(self, reminders_on: bool, subscribed: bool) -> InlineKeyboardMarkup:
@@ -149,71 +139,68 @@ class TelegramBot:
         rows = [
             [InlineKeyboardButton("🍽️ Tomorrow's Plan", callback_data="menu_tomorrow")],
             [InlineKeyboardButton("👩‍🍳 Get a Recipe", callback_data="req_recipe")],
-            [InlineKeyboardButton("❓ Ask a question", callback_data="ask_q")]
+            [InlineKeyboardButton("❓ Ask a question", callback_data="ask_q")],
         ]
-
-        if reminders_on:
-            rows.append([InlineKeyboardButton("🔕 Stop reminders", callback_data="rem_stop")])
-        else:
-            rows.append([InlineKeyboardButton("🔔 Activate reminders", callback_data="rem_start")])
-
-        if subscribed:
-            rows.append([InlineKeyboardButton("💳 Manage subscription", callback_data="manage_sub")])
-        else:
-            rows.append([InlineKeyboardButton("💳 Subscribe", callback_data="subscribe")])
-
+        rows.append([
+            InlineKeyboardButton("🔕 Stop reminders" if reminders_on else "🔔 Activate reminders",
+                                 callback_data="rem_stop" if reminders_on else "rem_start")
+        ])
+        rows.append([
+            InlineKeyboardButton("💳 Manage subscription" if subscribed else "💳 Subscribe",
+                                 callback_data="manage_sub" if subscribed else "subscribe")
+        ])
         return InlineKeyboardMarkup(rows)
 
-        async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-     """Handle /start command"""
-     user = update.effective_user
-     logger.info(f"➡️ /start triggered by user: {user.id} ({user.username})")
+    # ✅ FIXED indentation: now class-level method
+    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /start command"""
+        user = update.effective_user
+        logger.info(f"➡️ /start triggered by user: {user.id} ({user.username})")
 
-     try:
-         # Create or fetch user
-         created_user = self.db.get_or_create_user(
-             telegram_id=user.id,
-             username=user.username,
-             first_name=user.first_name
-         )
-         logger.info(f"✅ User record ready: {created_user}")
+        try:
+            created_user = self.db.get_or_create_user(
+                telegram_id=user.id,
+                username=user.username,
+                first_name=user.first_name,
+            )
+            logger.info(f"✅ User record ready: {created_user}")
 
-         intro_text = (
-             f"👋 *Welcome to BiteIQBot*, {md(user.first_name)} — your smart nutrition coach! 🥗\n\n"
-             "To personalize your plan, please send the following 8 details (each on a new line or separated by commas):\n\n"
-             "1️⃣ Name\n"
-             "2️⃣ Age\n"
-             "3️⃣ Gender (M/F)\n"
-             "4️⃣ Height (cm)\n"
-             "5️⃣ Weight (kg)\n"
-             "6️⃣ Activity level (low / medium / high)\n"
-             "7️⃣ Dietary restrictions (or 'none')\n"
-             "8️⃣ Goal weight (kg)\n\n"
-             "📅 Your daily plan will be automatically sent at 06:00."
-         )
+            intro_text = (
+                f"👋 *Welcome to BiteIQBot*, {md(user.first_name)} — your smart nutrition coach! 🥗\n\n"
+                "To personalize your plan, please send the following 8 details (each on a new line or separated by commas):\n\n"
+                "1️⃣ Name\n"
+                "2️⃣ Age\n"
+                "3️⃣ Gender (M/F)\n"
+                "4️⃣ Height (cm)\n"
+                "5️⃣ Weight (kg)\n"
+                "6️⃣ Activity level (low / medium / high)\n"
+                "7️⃣ Dietary restrictions (or 'none')\n"
+                "8️⃣ Goal weight (kg)\n\n"
+                "📅 Your daily plan will be automatically sent at 06:00."
+            )
 
-         await update.message.reply_text(
-             intro_text,
-             parse_mode="MarkdownV2",
-             disable_web_page_preview=True
-         )
+            await update.message.reply_text(
+                intro_text,
+                parse_mode="MarkdownV2",
+                disable_web_page_preview=True,
+            )
+            await update.message.reply_text(
+                "📋 Type /menu anytime to open your main options.",
+                parse_mode="MarkdownV2",
+            )
+            logger.info(f"✅ /start message sent to {user.id}")
 
-         await update.message.reply_text(
-             "📋 Type /menu anytime to open your main options.",
-             parse_mode="MarkdownV2"
-         )
+        except Exception as e:
+            logger.error(f"❌ Error in /start: {e}", exc_info=True)
+            try:
+                await update.message.reply_text(
+                    "⚠️ Sorry, something went wrong while starting the bot\\. Please try again later\\.",
+                    parse_mode="MarkdownV2",
+                )
+            except Exception as e2:
+                logger.error(f"⚠️ Failed to send error message: {e2}", exc_info=True)
 
-         logger.info(f"✅ /start message sent to {user.id}")
-
-     except Exception as e:
-         logger.error(f"❌ Error in /start: {e}", exc_info=True)
-         try:
-             await update.message.reply_text(
-                 "⚠️ Sorry, something went wrong while starting the bot\\. Please try again later\\.",
-                 parse_mode="MarkdownV2"
-             )
-         except Exception as e2:
-             logger.error(f"⚠️ Failed to send error message: {e2}", exc_info=True)
+    # (rest of file stays identical — menu_command, help_command, etc.)
 
 
 

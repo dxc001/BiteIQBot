@@ -1,9 +1,17 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
+import logging
+import asyncio
+from datetime import date, timedelta
+from typing import Any, Dict, List
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup
+)
 from telegram.ext import (
     Application,
     CommandHandler,
-    CallbackQueryHandler,
     MessageHandler,
+    CallbackQueryHandler,
     ContextTypes,
     filters
 )
@@ -12,27 +20,21 @@ from database import Database
 from openai_handler import OpenAIHandler
 from stripe_handler import StripeHandler
 from config import TELEGRAM_BOT_TOKEN, WEBHOOK_URL
-import logging
-import re
-from datetime import date, timedelta
-from typing import Dict, Any, List, Optional, Tuple
 
+# === Logging ===
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("telegram_bot")
 
+# === Markdown escape utility ===
 MD_RISKY = ["\\", "_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!"]
 
 def md(text: Any) -> str:
-    """Make text safe for MarkdownV2"""
+    """Escape risky characters for MarkdownV2"""
     s = str(text)
     s = escape_markdown(s, version=2)
     for ch in MD_RISKY:
         s = s.replace(ch, f"\\{ch}")
     return s
-
-def bold(text: Any) -> str:
-    """Make text bold in MarkdownV2"""
-    return f"*{md(text)}*"
 
 
 class TelegramBot:
@@ -48,292 +50,180 @@ class TelegramBot:
         self.setup_handlers()
 
     async def initialize(self):
+        """Initialize Telegram application"""
         await self.application.initialize()
         await self.application.start()
+        logger.info("🤖 Telegram bot initialized")
 
+    # === HANDLERS SETUP ===
     def setup_handlers(self):
-        """Setup all command and message handlers"""
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(CommandHandler("menu", self.menu_command))
         self.application.add_handler(CommandHandler("help", self.help_command))
-        self.application.add_handler(CommandHandler("tomorrow", self.tomorrow_command))
         self.application.add_handler(CommandHandler("subscribe", self.subscribe_command))
+        self.application.add_handler(CommandHandler("tomorrow", self.tomorrow_command))
         self.application.add_handler(CallbackQueryHandler(self.button_callback))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
 
-    def is_subscribed(self, user: Optional[Dict[str, Any]]) -> bool:
-        if not user:
-            return False
-        telegram_id = user.get("telegram_id")
-        return self.db.has_active_subscription(telegram_id)
-
-    def parse_profile_input(self, txt: str) -> Optional[Tuple]:
-        """Parse user profile"""
-        parts = [p.strip() for p in (txt.split(",") if "," in txt else txt.splitlines()) if p.strip()]
-        if len(parts) != 8:
-            return None
-        try:
-            name = parts[0]
-            age = int(re.sub(r"[^\d]", "", parts[1]))
-            gender = parts[2]
-            height_cm = float(re.sub(r"[^\d.]", "", parts[3]))
-            weight_kg = float(re.sub(r"[^\d.]", "", parts[4]))
-            activity = parts[5]
-            diet = parts[6]
-            goal_kg = float(re.sub(r"[^\d.]", "", parts[7]))
-        except Exception:
-            return None
-        return (name, age, gender, height_cm, weight_kg, activity, diet, goal_kg)
-
-    def format_plan_text(self, name: str, plan: dict, title: str = "Your Personalized Meal Plan") -> str:
-        """Format meal plan"""
-        lines = [f"🥗 *{md(title)}* – *{md(name)}*", "━━━━━━━━━━━━━━━"]
-        emap = {"Breakfast": "🍳", "Lunch": "🥗", "Dinner": "🍽️", "Snack": "🥤"}
-        for m in plan.get("meals", []):
-            meal = m.get("meal", "Meal")
-            emoji = emap.get(meal, "🍴")
-            ttl = m.get("title", "")
-            desc = m.get("description", "")
-            cal = m.get("calories", "")
-            lines.append(f"\n{emoji} *{md(meal)}*: {md(ttl)}")
-            lines.append(f"_{md(desc)}_")
-            lines.append(f"🔥 *{md(str(cal))} kcal*")
-        lines.append("\n━━━━━━━━━━━━━━━")
-        if "total_calories" in plan:
-            lines.append(f"📊 *Total:* {md(plan['total_calories'])} kcal")
-        if plan.get("tip"):
-            lines.append(f"💡 *Tip:* {md(plan['tip'])}")
-        return "\n".join(lines)
-
-    def format_recipe_text(self, title: str, content: str) -> str:
-        content = re.sub(r"\*\*", "*", content).strip()
-        return "\n".join([
-            f"👩‍🍳 *Recipe for {md(title)}*",
-            "━━━━━━━━━━━━━━━",
-            md(content),
-            "━━━━━━━━━━━━━━━",
-        ])
-
-    def build_recipe_buttons(self, meals: List[dict]) -> InlineKeyboardMarkup:
-        buttons = []
-        for m in meals:
-            if m.get("meal") in ["Breakfast", "Lunch", "Dinner"]:
-                icon = {"Breakfast": "🍳", "Lunch": "🥗", "Dinner": "🍽️"}[m["meal"]]
-                title = m.get("title") or m["meal"]
-                buttons.append([InlineKeyboardButton(f"{icon} {m['meal']} Recipe", callback_data=f"recipe|{title}")])
-        if not buttons:
-            buttons.append([InlineKeyboardButton("👩‍🍳 Get a Recipe", callback_data="req_recipe")])
-        return InlineKeyboardMarkup(buttons)
-
-    def menu_keyboard(self, reminders_on: bool, subscribed: bool) -> InlineKeyboardMarkup:
-        rows = [
-            [InlineKeyboardButton("🍽️ Tomorrow's Plan", callback_data="menu_tomorrow")],
-            [InlineKeyboardButton("👩‍🍳 Get a Recipe", callback_data="req_recipe")],
-            [InlineKeyboardButton("❓ Ask a question", callback_data="ask_q")],
-        ]
-        rows.append([
-            InlineKeyboardButton("🔕 Stop reminders" if reminders_on else "🔔 Activate reminders",
-                                 callback_data="rem_stop" if reminders_on else "rem_start")
-        ])
-        rows.append([
-            InlineKeyboardButton("💳 Manage subscription" if subscribed else "💳 Subscribe",
-                                 callback_data="manage_sub" if subscribed else "subscribe")
-        ])
-        return InlineKeyboardMarkup(rows)
-
-    # ✅ CLEAN FIXED VERSION OF /START
+    # === /START ===
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user = update.effective_user
-        logger.info(f"➡️ /start triggered by user: {user.id} ({user.username})")
         try:
-            created_user = self.db.get_or_create_user(
-                telegram_id=user.id,
-                username=user.username,
-                first_name=user.first_name,
-            )
-            logger.info(f"✅ User record ready: {created_user}")
+            user_id = update.effective_user.id
+            username = update.effective_user.username
+            logger.info(f"➡️ /start triggered by {username}")
 
-            intro_text = md(
-                "👋 Welcome to BiteIQBot — your smart nutrition coach 🥗\n\n"
-                "Let's set up your profile so I can generate your personalized daily plan.\n\n"
-                "Please send the following 8 details (each on a new line or separated by commas):\n\n"
+            # Create or update user in Supabase
+            user = self.db.get_user(user_id)
+            if not user:
+                self.db.create_user(user_id, username)
+
+            welcome = (
+                "👋 *Welcome to BiteIQBot — your smart nutrition coach!* 🥗\n\n"
+                "To personalize your plan, please send the following 8 details "
+                "_(each on a new line or separated by commas)_: \n\n"
                 "1️⃣ Name\n"
                 "2️⃣ Age\n"
                 "3️⃣ Gender (M/F)\n"
-                "4️⃣ Height (cm or inches)\n"
-                "5️⃣ Weight (kg or lbs)\n"
+                "4️⃣ Height (cm)\n"
+                "5️⃣ Weight (kg)\n"
                 "6️⃣ Activity level (low / medium / high)\n"
-                "7️⃣ Dietary restrictions (or 'none')\n"
-                "8️⃣ Goal weight (kg or lbs)\n\n"
-                "📅 Once complete, your plan will be generated automatically each morning at 06:00"
+                "7️⃣ Dietary restrictions (or none)\n"
+                "8️⃣ Goal weight (kg)\n\n"
+                "📅 Your daily plan will be automatically sent at *06:00*!"
             )
 
-            await update.message.reply_text(
-                intro_text,
-                parse_mode="MarkdownV2",
-                disable_web_page_preview=True,
-            )
-            await update.message.reply_text(
-                md("📋 Type /menu anytime to open your main options."),
-                parse_mode="MarkdownV2",
-            )
-            logger.info(f"✅ /start message sent to {user.id}")
+            await update.message.reply_text(welcome, parse_mode="MarkdownV2")
 
         except Exception as e:
-            logger.error(f"❌ Error in /start: {e}", exc_info=True)
-            try:
-                await update.message.reply_text(
-                    md("⚠️ Sorry, something went wrong while starting the bot. Please try again later."),
-                    parse_mode="MarkdownV2",
-                )
-            except Exception as e2:
-                logger.error(f"⚠️ Failed to send error message: {e2}", exc_info=True)
-
-    # ✅ Fix the “Great, name!” message too
-    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        uid = update.effective_user.id
-        text = update.message.text.strip()
-
-        parsed = self.parse_profile_input(text)
-        if parsed:
-            (name, age, gender, height_cm, weight_kg, activity, diet, goal_kg) = parsed
-            self.db.upsert_user_profile(uid, name, age, gender, height_cm, weight_kg, activity, diet, goal_kg)
-            await update.message.reply_text(md(f"🔥 Great, {name} Preparing your personalized plan..."), parse_mode="MarkdownV2")
-            # rest of function remains unchanged
-
-            u = self.db.get_user(uid)
-
-            await update.message.reply_text(md(f"🔥 Great, {name}! Preparing your personalized plan…"), parse_mode="MarkdownV2")
-            await context.bot.send_chat_action(chat_id=uid, action="typing")
-
-            recent = self.db.get_recent_meals(uid, 7)
-            profile = u or {
-                "name": name, "age": age, "gender": gender, "height_cm": height_cm,
-                "weight_kg": weight_kg, "activity": activity, "diet": diet, "goal_kg": goal_kg
-            }
-            plan = self.openai.generate_plan_json(profile, "today", recent)
-            self.db.save_plan(uid, date.today(), plan)
-            self.db.add_meals_to_history(uid, [m.get("title", "") for m in plan.get("meals", [])])
-
-            txt = self.format_plan_text(name, plan, "Your Personalized Meal Plan")
-            await update.message.reply_text(txt, parse_mode="MarkdownV2", reply_markup=self.build_recipe_buttons(plan.get("meals", [])))
-
-            kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Yes — meal & hydration reminders", callback_data="rem_start")],
-                [InlineKeyboardButton("❌ No thanks", callback_data="rem_stop")]
-            ])
-            await update.message.reply_text("🔔 Enable day reminders?", reply_markup=kb)
-            return
-
-        if not any(k in text.lower() for k in [
-            "diet", "calorie", "protein", "carb", "fat", "meal", "weight", "nutrition", "kcal",
-            "recipe", "breakfast", "lunch", "dinner"
-        ]):
+            logger.exception(f"❌ Error in /start: {e}")
             await update.message.reply_text(
-                "💬 I'm your nutrition coach — I answer only diet \\& meal questions\\.\n"
-                "Send your profile \\(8 details\\) to get started\\.",
-                parse_mode="MarkdownV2"
+                "⚠️ Sorry, something went wrong while starting the bot. Please try again later."
             )
+
+    # === /MENU ===
+    async def menu_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Main menu for user"""
+        try:
+            keyboard = [
+                [InlineKeyboardButton("📅 Tomorrow Plan", callback_data="tomorrow_plan")],
+                [InlineKeyboardButton("💳 Subscribe", callback_data="subscribe")],
+                [InlineKeyboardButton("❓ Help", callback_data="help")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await update.message.reply_text(
+                "🍽️ *Welcome to BiteIQ Menu!*\n\n"
+                "Choose what you’d like to do:",
+                reply_markup=reply_markup,
+                parse_mode="MarkdownV2",
+            )
+        except Exception as e:
+            logger.error(f"❌ menu_command error: {e}")
+            await update.message.reply_text("⚠️ Something went wrong while opening the menu.")
+
+    # === /HELP ===
+    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        help_text = (
+            "ℹ️ *BiteIQBot Commands:*\n\n"
+            "• `/start` — Restart setup\n"
+            "• `/menu` — Open the main menu\n"
+            "• `/tomorrow` — Get tomorrow’s plan\n"
+            "• `/subscribe` — Manage your subscription\n\n"
+            "💡 Just send your profile details again anytime to update them!"
+        )
+        await update.message.reply_text(help_text, parse_mode="MarkdownV2")
+
+    # === /SUBSCRIBE ===
+    async def subscribe_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        try:
+            checkout_url = self.stripe.create_checkout_session(update.effective_user.id)
+            await update.message.reply_text(f"💳 Click below to subscribe:\n{checkout_url}")
+        except Exception as e:
+            logger.error(f"Stripe error: {e}")
+            await update.message.reply_text("❌ Unable to create a Stripe checkout session right now.")
+
+    # === /TOMORROW ===
+    async def tomorrow_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = self.db.get_user(update.effective_user.id)
+        if not user:
+            await update.message.reply_text("⚠️ Please set up your profile first with /start.")
             return
 
-        profile = self.db.get_user(uid)
-        if not self.is_subscribed(profile):
-            await update.message.reply_text("🔒 Please /subscribe to chat with your coach\\.", parse_mode="MarkdownV2")
-            return
+        name = user["name"]
+        meals = self.openai.generate_plan_json(user, "tomorrow")
+        tomorrow = date.today() + timedelta(days=1)
 
-        ans = self.openai.get_ai_response(uid, text)
-        await update.message.reply_text(md(ans), parse_mode="MarkdownV2")
+        self.db.save_plan(user["telegram_id"], tomorrow, meals)
+        text = self.format_plan_text(name, meals, "Your Plan for Tomorrow")
 
+        await update.message.reply_text(text, parse_mode="MarkdownV2")
+
+    # === CALLBACKS ===
     async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle button callbacks"""
-        q = update.callback_query
-        await q.answer()
+        query = update.callback_query
+        await query.answer()
 
-        uid = q.from_user.id
-        data = q.data or ""
-        u = self.db.get_user(uid)
+        if query.data == "tomorrow_plan":
+            await self.tomorrow_command(update, context)
+        elif query.data == "subscribe":
+            await self.subscribe_command(update, context)
+        elif query.data == "help":
+            await self.help_command(update, context)
+        else:
+            await query.edit_message_text("⚠️ Unknown option selected.")
 
-        if data == "rem_start":
-            self.db.set_reminders(uid, True)
-            await q.edit_message_text("🔔 Reminders ON: 08:00, 10:00, 13:00, 15:00, 18:00\\.", parse_mode="MarkdownV2")
-
-        elif data == "rem_stop":
-            self.db.set_reminders(uid, False)
-            await q.edit_message_text("🔕 Reminders OFF\\. You'll still receive the daily 06:00 plan\\.", parse_mode="MarkdownV2")
-
-        elif data == "menu_tomorrow":
-            if not u or not u.get('name'):
-                await q.edit_message_text("Please set up your profile first with /start\\.", parse_mode="MarkdownV2")
-                return
-
-            if not self.is_subscribed(u):
-                await q.edit_message_text("🔒 Please /subscribe to get tomorrow's plan\\.", parse_mode="MarkdownV2")
-                return
-
-            name = u["name"]
-            recent = self.db.get_recent_meals(uid, 7)
-            plan = self.openai.generate_plan_json(u, "tomorrow", recent)
-
-            tomorrow = date.today() + timedelta(days=1)
-            self.db.save_plan(uid, tomorrow, plan)
-            self.db.add_meals_to_history(uid, [m.get("title", "") for m in plan.get("meals", [])])
-
-            txt = self.format_plan_text(name, plan, "Your Plan for Tomorrow")
-            await context.bot.send_message(chat_id=uid, text=txt, parse_mode="MarkdownV2",
-                                          reply_markup=self.build_recipe_buttons(plan.get("meals", [])))
-
-        elif data == "req_recipe":
-            if not self.is_subscribed(u):
-                await q.edit_message_text("🔒 Please /subscribe to get recipes\\.", parse_mode="MarkdownV2")
-                return
-
-            self.awaiting_recipe[uid] = True
-            await context.bot.send_message(chat_id=uid, text="👩‍🍳 Type the meal name you'd like a recipe for\\.", parse_mode="MarkdownV2")
-
-        elif data.startswith("recipe|"):
-            if not self.is_subscribed(u):
-                await q.edit_message_text("🔒 Please /subscribe to get recipes\\.", parse_mode="MarkdownV2")
-                return
-
-            meal_title = data.split("|", 1)[1].strip() or "Meal"
-            r = self.openai.generate_recipe_text(meal_title, u)
-            await context.bot.send_message(chat_id=uid, text=self.format_recipe_text(meal_title, r), parse_mode="MarkdownV2")
-
-        elif data == "ask_q":
-            if not self.is_subscribed(u):
-                await q.edit_message_text("🔒 Please /subscribe to ask questions\\.", parse_mode="MarkdownV2")
-                return
-
-            self.awaiting_question[uid] = True
-            await context.bot.send_message(chat_id=uid, text="❓ Send your nutrition question \\(short\\)\\.", parse_mode="MarkdownV2")
-
-        elif data == "subscribe":
-            try:
-                checkout_url = self.stripe.create_checkout_session(uid)
-                await context.bot.send_message(chat_id=uid, text=f"💳 Subscribe here:\n{checkout_url}")
-            except Exception as e:
-                logger.error(f"Stripe error: {e}")
-                await context.bot.send_message(chat_id=uid, text="❌ Sorry, there was an error creating your checkout session\\. Please try again later\\.", parse_mode="MarkdownV2")
-
-        elif data == "manage_sub":
-            customer_id = (u or {}).get("stripe_customer_id")
-            if not customer_id:
-                subscription_response = self.db.client.table('subscriptions').select('stripe_customer_id').eq('user_id', u['id']).maybe_single().execute()
-                if subscription_response.data:
-                    customer_id = subscription_response.data.get('stripe_customer_id')
-
-            if not customer_id:
-                await context.bot.send_message(chat_id=uid, text="No active subscription found\\.", parse_mode="MarkdownV2")
-                return
-
-            try:
-                import stripe
-                portal = stripe.billing_portal.Session.create(
-                    customer=customer_id,
-                    return_url=f"{WEBHOOK_URL}/settings"
+    # === MESSAGE HANDLER ===
+    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle free text (user profile input)"""
+        try:
+            text = update.message.text
+            parts = [p.strip() for p in text.replace("\n", ",").split(",") if p.strip()]
+            if len(parts) < 8:
+                await update.message.reply_text(
+                    "⚠️ Please provide all 8 details as described in /start."
                 )
-                await context.bot.send_message(chat_id=uid, text=f"🔧 Manage your subscription:\n{portal.url}")
-            except Exception as e:
-                logger.error(f"Stripe portal error: {e}")
-                await context.bot.send_message(chat_id=uid, text="❌ Error creating portal session\\.", parse_mode="MarkdownV2")
+                return
+
+            name, age, gender, height, weight, activity, diet, goal = parts[:8]
+            data = {
+                "name": name,
+                "age": int(age),
+                "gender": gender.upper(),
+                "height_cm": int(height.replace("cm", "")),
+                "weight_kg": int(weight.replace("kg", "")),
+                "activity": activity.capitalize(),
+                "diet": diet.capitalize(),
+                "goal_kg": int(goal.replace("kg", "")),
+            }
+
+            self.db.update_user(update.effective_user.id, data)
+            await update.message.reply_text(
+                f"🔥 Great, {md(name)}! Preparing your personalized plan…",
+                parse_mode="MarkdownV2",
+            )
+
+            plan = self.openai.generate_plan_json(data, "today")
+            self.db.save_plan(update.effective_user.id, date.today(), plan)
+            text = self.format_plan_text(name, plan, "Your Personalized Plan")
+            await update.message.reply_text(text, parse_mode="MarkdownV2")
+
+        except Exception as e:
+            logger.exception(f"❌ handle_message error: {e}")
+            await update.message.reply_text("⚠️ Something went wrong, please try again later.")
+
+    # === FORMAT PLAN ===
+    def format_plan_text(self, name: str, plan: Dict[str, Any], title: str) -> str:
+        try:
+            meals = plan.get("meals", [])
+            text = f"*{md(title)}* for {md(name)}:\n\n"
+            for meal in meals:
+                text += f"🍴 *{md(meal.get('title',''))}*\n"
+                text += f"🕒 {md(meal.get('time',''))}\n"
+                text += f"{md(meal.get('description',''))}\n\n"
+            return text.strip()
+        except Exception as e:
+            logger.error(f"Error formatting plan: {e}")
+            return "⚠️ Could not format meal plan."
+
+
 

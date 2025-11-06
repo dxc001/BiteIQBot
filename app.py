@@ -11,12 +11,12 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("app")
 
-# Initialize your core components
+# ✅ Initialize core components correctly
 db = Database()
-openai_handler = OpenAIHandler()
+openai_handler = OpenAIHandler(db=db)   # <-- FIXED: pass db here
 stripe_handler = StripeHandler()
 
-# Initialize Telegram bot
+# ✅ Initialize Telegram bot
 bot = TelegramBot(db=db, openai_handler=openai_handler, stripe_handler=stripe_handler)
 application = bot.application
 
@@ -58,17 +58,15 @@ def webhook():
                 application.update_queue.factory.update_from_dict(update_data)
             )
 
-        # ✅ SAFE ASYNC LOOP FIX
+        # ✅ SAFE ASYNC LOOP FIX (Render compatible)
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             loop = None
 
         if loop and loop.is_running():
-            # If the loop is already running, schedule task
             loop.create_task(process())
         else:
-            # If not running (Render case), start a clean event loop
             asyncio.run(process())
 
         return "OK", 200

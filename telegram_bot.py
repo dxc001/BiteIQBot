@@ -165,19 +165,19 @@ class TelegramBot:
             )
             logger.info(f"✅ User record ready: {created_user}")
 
-            intro_text = (
-                f"👋 *Welcome to BiteIQBot*, {md(user.first_name)} — your smart nutrition coach! 🥗\n\n"
-                "To personalize your plan, please send the following 8 details (each on a new line or separated by commas):\n\n"
-                "1️⃣ Name\n"
-                "2️⃣ Age\n"
-                "3️⃣ Gender (M/F)\n"
-                "4️⃣ Height (cm)\n"
-                "5️⃣ Weight (kg)\n"
-                "6️⃣ Activity level (low / medium / high)\n"
-                "7️⃣ Dietary restrictions (or 'none')\n"
-                "8️⃣ Goal weight (kg)\n\n"
-                "📅 Your daily plan will be automatically sent at 06:00."
-            )
+            intro_text = md(
+    "👋 Welcome to BiteIQBot — your smart nutrition coach 🥗\n\n"
+    "To personalize your plan, please send the following 8 details (each on a new line or separated by commas):\n\n"
+    "1️⃣ Name\n"
+    "2️⃣ Age\n"
+    "3️⃣ Gender (M/F)\n"
+    "4️⃣ Height (cm)\n"
+    "5️⃣ Weight (kg)\n"
+    "6️⃣ Activity level (low / medium / high)\n"
+    "7️⃣ Dietary restrictions (or none)\n"
+    "8️⃣ Goal weight (kg)\n\n"
+    "📅 Your daily plan will be automatically sent at 06:00"
+)
 
             await update.message.reply_text(
                 intro_text,

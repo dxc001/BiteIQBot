@@ -1,95 +1,82 @@
-# ==========================================================
-# app.py — Flask + Telegram bot unified server (Render-ready)
-# ==========================================================
-
 import asyncio
 import logging
-import os
 from flask import Flask, request, jsonify
-from telegram import Update
-from telegram.error import TelegramError
-
+from telegram_bot import TelegramBot
 from database import Database
 from openai_handler import OpenAIHandler
 from stripe_handler import StripeHandler
-from telegram_bot import TelegramBot
-from scheduler import ReminderScheduler
-from config import WEBHOOK_URL
+from config import WEBHOOK_URL, TELEGRAM_BOT_TOKEN
 
-# ----------------------------------------------------------
-# Logging setup
-# ----------------------------------------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-)
+app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("app")
 
-# ----------------------------------------------------------
-# Core initialization
-# ----------------------------------------------------------
-app = Flask(__name__)
-
+# Initialize your core components
 db = Database()
-openai_handler = OpenAIHandler(db)
-stripe_handler = StripeHandler(db)
-telegram_bot = TelegramBot(db, openai_handler, stripe_handler)
-scheduler = ReminderScheduler(db, openai_handler)
+openai_handler = OpenAIHandler()
+stripe_handler = StripeHandler()
 
-# ----------------------------------------------------------
-# Async startup
-# ----------------------------------------------------------
-async def startup():
-    """Initialize Telegram bot and scheduler."""
-    await telegram_bot.application.initialize()
-    await telegram_bot.application.start()
-    await telegram_bot.application.bot.set_webhook(f"{WEBHOOK_URL}/webhook")
-    logger.info(f"✅ Webhook set to {WEBHOOK_URL}/webhook")
-    scheduler.start()
-    logger.info("⏰ Scheduler started")
+# Initialize Telegram bot
+bot = TelegramBot(db=db, openai_handler=openai_handler, stripe_handler=stripe_handler)
+application = bot.application
 
-loop = asyncio.get_event_loop()
-loop.run_until_complete(startup())
 
-# ----------------------------------------------------------
-# Routes
-# ----------------------------------------------------------
-@app.get("/")
+@app.before_first_request
+def setup():
+    """Set the Telegram webhook when the service starts."""
+    import requests
+
+    try:
+        webhook_url = f"{WEBHOOK_URL}/webhook"
+        resp = requests.get(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook",
+            params={"url": webhook_url},
+            timeout=10,
+        )
+        logger.info(f"🤖 Webhook set: {resp.text}")
+    except Exception as e:
+        logger.exception(f"❌ Failed to set webhook: {e}")
+
+
+@app.route("/")
 def index():
-    return jsonify({"status": "online", "service": "BiteIQBot"}), 200
+    return "BiteIQBot is live!", 200
 
-@app.get("/health")
-def health():
-    return jsonify({"status": "healthy"}), 200
 
 @app.post("/webhook")
-def telegram_webhook():
-    """Receive Telegram webhook and safely dispatch to async bot."""
+def webhook():
+    """Handle Telegram webhook updates."""
     try:
-        data = request.get_json(force=True)
-        logger.info(f"📩 Incoming update: {data}")
-        update = Update.de_json(data, telegram_bot.application.bot)
+        update_data = request.get_json(force=True)
+        if not update_data:
+            return jsonify({"error": "No update data"}), 400
+
+        logger.info(f"📩 Incoming update: {update_data}")
 
         async def process():
-            try:
-                await telegram_bot.application.process_update(update)
-            except TelegramError as te:
-                logger.error(f"⚠️ Telegram API error: {te}")
-            except Exception as e:
-                logger.exception(f"❌ Error processing update: {e}")
+            await application.process_update(
+                application.update_queue.factory.update_from_dict(update_data)
+            )
 
-        # Run coroutine safely whether loop already running or not
+        # ✅ SAFE ASYNC LOOP FIX
         try:
-            asyncio.run(process())
+            loop = asyncio.get_running_loop()
         except RuntimeError:
-            loop = asyncio.get_event_loop()
+            loop = None
+
+        if loop and loop.is_running():
+            # If the loop is already running, schedule task
             loop.create_task(process())
+        else:
+            # If not running (Render case), start a clean event loop
+            asyncio.run(process())
 
         return "OK", 200
 
     except Exception as e:
         logger.exception(f"❌ Webhook error: {e}")
         return jsonify({"error": str(e)}), 500
+
 
 @app.post("/stripe-webhook")
 def stripe_webhook():
@@ -103,12 +90,13 @@ def stripe_webhook():
         logger.exception(f"❌ Stripe webhook error: {e}")
         return jsonify({"error": str(e)}), 500
 
-# ----------------------------------------------------------
-# Entry point
-# ----------------------------------------------------------
+
 if __name__ == "__main__":
-    PORT = int(os.environ.get("PORT", 8080))
-    logger.info(f"🚀 Starting BiteIQBot on port {PORT}")
-    app.run(host="0.0.0.0", port=PORT) 
+    import os
+
+    port = int(os.environ.get("PORT", 8080))
+    logger.info(f"🚀 Starting BiteIQBot server on port {port}")
+    app.run(host="0.0.0.0", port=port)
+
 
 

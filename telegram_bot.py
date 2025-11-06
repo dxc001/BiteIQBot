@@ -165,24 +165,57 @@ class TelegramBot:
         return InlineKeyboardMarkup(rows)
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /start command"""
-        user = update.effective_user
-        self.db.get_or_create_user(
+    """Handle /start command"""
+    user = update.effective_user
+    logger.info(f"➡️ /start triggered by user: {user.id} ({user.username})")
+
+    try:
+        # Create or fetch user
+        created_user = self.db.get_or_create_user(
             telegram_id=user.id,
             username=user.username,
             first_name=user.first_name
         )
+        logger.info(f"✅ User record ready: {created_user}")
 
-        intro = (
-            "👋 " + bold("Welcome to BiteIQBot") + " — your nutrition coach\\.\n\n"
-            "To personalize your plan, send the following **8 details** \\(each on a new line or separated by commas\\):\n"
-            "👤 Name\n🎂 Age\n⚧ Gender \\(M/F\\)\n📏 Height \\(cm\\)\n⚖️ Weight \\(kg\\)\n🔥 Activity \\(low/medium/high\\)\n"
-            "🥗 Dietary restrictions \\(or 'none'\\)\n🎯 Goal weight \\(kg\\)\n\n"
-            "Daily plan is sent at 06\\:00 automatically\\."
+        # Build intro text safely
+        intro_text = (
+            f"👋 *Welcome to BiteIQBot*, {md(user.first_name)} — your smart nutrition coach! 🥗\n\n"
+            "To personalize your plan, please send the following 8 details (each on a new line or separated by commas):\n\n"
+            "1️⃣ Name\n"
+            "2️⃣ Age\n"
+            "3️⃣ Gender (M/F)\n"
+            "4️⃣ Height (cm)\n"
+            "5️⃣ Weight (kg)\n"
+            "6️⃣ Activity level (low / medium / high)\n"
+            "7️⃣ Dietary restrictions (or 'none')\n"
+            "8️⃣ Goal weight (kg)\n\n"
+            "📅 Your daily plan will be automatically sent at 06:00."
         )
 
-        await update.message.reply_text(intro, parse_mode="MarkdownV2")
-        await update.message.reply_text("📋 Open the menu anytime with /menu")
+        await update.message.reply_text(
+            intro_text,
+            parse_mode="MarkdownV2",
+            disable_web_page_preview=True
+        )
+
+        await update.message.reply_text(
+            "📋 Type /menu anytime to open your main options.",
+            parse_mode="MarkdownV2"
+        )
+
+        logger.info(f"✅ /start message sent to {user.id}")
+
+    except Exception as e:
+        logger.error(f"❌ Error in /start: {e}", exc_info=True)
+        try:
+            await update.message.reply_text(
+                "⚠️ Sorry, something went wrong while starting the bot\\. Please try again later\\.",
+                parse_mode="MarkdownV2"
+            )
+        except Exception as e2:
+            logger.error(f"⚠️ Failed to send error message: {e2}", exc_info=True)
+
 
     async def menu_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /menu command"""

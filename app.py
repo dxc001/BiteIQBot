@@ -13,8 +13,8 @@ logger = logging.getLogger("app")
 
 # ✅ Initialize core components correctly
 db = Database()
-openai_handler = OpenAIHandler(db=db)   # <-- FIXED: pass db here
-stripe_handler = StripeHandler()
+openai_handler = OpenAIHandler(db=db)     # fixed
+stripe_handler = StripeHandler(db=db)     # fixed — add db here
 
 # ✅ Initialize Telegram bot
 bot = TelegramBot(db=db, openai_handler=openai_handler, stripe_handler=stripe_handler)
@@ -95,6 +95,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     logger.info(f"🚀 Starting BiteIQBot server on port {port}")
     app.run(host="0.0.0.0", port=port)
+
 
 
 

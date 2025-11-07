@@ -16,7 +16,7 @@ httpx.Client.__init__ = _safe_init
 logger = logging.getLogger(__name__)
 
 
-class Database:
+class SupabaseDB:
     def __init__(self):
         if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
             raise ValueError("❌ Missing SUPABASE_URL or SUPABASE_SERVICE_KEY in environment variables.")

@@ -1,82 +1,112 @@
 import os
-import logging
 import asyncio
+import logging
 from flask import Flask, request, jsonify
-from database import Database
+from telegram import Update
+from telegram.ext import Application
+
+from database import SupabaseDB
+from telegram_bot import TelegramBot
 from openai_handler import OpenAIHandler
 from stripe_handler import StripeHandler
-from telegram_bot import TelegramBot
 
-# === Logging ===
+# ──────────────────────────────
+# Logging setup
+# ──────────────────────────────
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("app")
 
-# === Initialize components ===
+# ──────────────────────────────
+# Flask setup
+# ──────────────────────────────
 app = Flask(__name__)
-db = Database()
+
+# ──────────────────────────────
+# Initialize core components
+# ──────────────────────────────
+db = SupabaseDB()
 openai_handler = OpenAIHandler(db=db)
 stripe_handler = StripeHandler(db=db)
 bot = TelegramBot(db=db, openai_handler=openai_handler, stripe_handler=stripe_handler)
 
+# Telegram application reference (so we can process updates)
+application: Application = bot.application
 
-# === Async initialization workaround for Flask 3.x ===
-# Flask 3.x removed before_first_request, so we run startup manually on first hit
-bot_initialized = False
-
-async def initialize_bot_once():
-    global bot_initialized
-    if not bot_initialized:
-        await bot.initialize()
-        bot_initialized = True
-        logger.info("🤖 Bot initialized successfully")
-
-
+# ──────────────────────────────
+# Health endpoint
+# ──────────────────────────────
 @app.route("/", methods=["GET"])
 def home():
-    """Render health check"""
-    return "✅ BiteIQBot is running on Render", 200
+    return "BiteIQBot is live ⚡", 200
 
 
-@app.route("/webhook", methods=["POST"])
-def telegram_webhook():
-    """Handle Telegram updates"""
+# ──────────────────────────────
+# Telegram webhook endpoint
+# ──────────────────────────────
+@app.post("/webhook")
+def webhook():
+    """Receive Telegram updates from Telegram servers."""
     try:
         update_data = request.get_json(force=True)
         logger.info(f"📩 Incoming Telegram update: {update_data}")
 
+        # Schedule processing asynchronously in background
         async def process():
-            await initialize_bot_once()
-            await bot.application.update_queue.put(update_data)
+            update = Update.de_json(update_data, application.bot)
+            await application.process_update(update)
 
         try:
-            asyncio.run(process())
-        except RuntimeError:
             loop = asyncio.get_event_loop()
-            loop.create_task(process())
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
 
+        loop.create_task(process())
+
+        # Respond instantly so Render doesn't timeout
         return "OK", 200
 
     except Exception as e:
-        logger.exception(f"❌ Telegram webhook error: {e}")
+        logger.exception(f"❌ Webhook error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/stripe-webhook", methods=["POST"])
+# ──────────────────────────────
+# Stripe webhook endpoint
+# ──────────────────────────────
+@app.post("/stripe-webhook")
 def stripe_webhook():
-    """Handle Stripe events."""
+    """Handle Stripe subscription and payment events."""
     try:
         event = request.get_json(force=True)
         logger.info(f"💳 Stripe event received: {event.get('type')}")
-        # TODO: implement subscription updates later
+        # You can later add: stripe_handler.process_event(event)
         return "OK", 200
     except Exception as e:
         logger.exception(f"❌ Stripe webhook error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
+# ──────────────────────────────
+# Auto-register Telegram webhook on startup
+# ──────────────────────────────
+@app.before_serving
+async def setup_webhook():
+    """Ensure Telegram knows where to send updates."""
+    webhook_url = "https://biteiqbot.onrender.com/webhook"
+    try:
+        await application.bot.set_webhook(webhook_url)
+        logger.info(f"🔗 Webhook registered successfully: {webhook_url}")
+    except Exception as e:
+        logger.error(f"⚠️ Failed to set webhook automatically: {e}")
+
+
+# ──────────────────────────────
+# Start (only for local debugging)
+# ──────────────────────────────
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5000))
-    logger.info(f"🚀 Starting BiteIQBot server on port {port}")
+    port = int(os.environ.get("PORT", 8080))
+    logger.info(f"🚀 Running locally on port {port}")
     app.run(host="0.0.0.0", port=port)
 
 

@@ -5,7 +5,7 @@ from flask import Flask, request, jsonify
 from telegram import Update
 from telegram.ext import Application
 
-from database import SupabaseDB
+from database import Database as SupabaseDB
 from telegram_bot import TelegramBot
 from openai_handler import OpenAIHandler
 from stripe_handler import StripeHandler

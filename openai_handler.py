@@ -1,12 +1,12 @@
 from openai import OpenAI
 from config import OPENAI_API_KEY, OPENAI_MODEL
-from database import Database
+from database import SupabaseDB
 from typing import List, Dict, Any, Optional
 import json
 import re
 
 class OpenAIHandler:
-    def __init__(self, db: Database):
+    def __init__(self, db: SupabaseDB):
         self.client = OpenAI(api_key=OPENAI_API_KEY)
         self.db = db
         self.model = OPENAI_MODEL

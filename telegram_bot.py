@@ -16,7 +16,7 @@ from telegram.ext import (
     filters
 )
 from telegram.helpers import escape_markdown
-from database import Database
+from database import SupabaseDB
 from openai_handler import OpenAIHandler
 from stripe_handler import StripeHandler
 from config import TELEGRAM_BOT_TOKEN, WEBHOOK_URL

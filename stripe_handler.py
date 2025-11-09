@@ -1,13 +1,13 @@
 import stripe
 from config import STRIPE_SECRET_KEY, STRIPE_PRICE_ID, WEBHOOK_URL
-from database import Database
+from database import SupabaseDB
 from datetime import datetime
 from typing import Dict, Any
 
 stripe.api_key = STRIPE_SECRET_KEY
 
 class StripeHandler:
-    def __init__(self, db: Database):
+    def __init__(self, db: SupabaseDB):
         self.db = db
 
     def create_checkout_session(self, telegram_id: int) -> str:

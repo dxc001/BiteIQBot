@@ -38,7 +38,7 @@ def md(text: Any) -> str:
 
 
 class TelegramBot:
-    def __init__(self, db: Database, openai_handler: OpenAIHandler, stripe_handler: StripeHandler):
+    def __init__(self, db, openai_handler, stripe_handler):
         self.db = db
         self.openai = openai_handler
         self.stripe = stripe_handler

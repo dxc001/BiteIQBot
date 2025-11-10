@@ -239,4 +239,6 @@ class SupabaseDB:
                 'messages': [{'role': role, 'content': content, 'timestamp': now}],
                 'updated_at': now
             }).execute()
+# ✅ Alias for backward compatibility
+Database = SupabaseDB
 

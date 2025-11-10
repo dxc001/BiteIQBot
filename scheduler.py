@@ -21,7 +21,7 @@ def md(text: str) -> str:
         s = s.replace(ch, f"\\{ch}")
     return s
 
-class ReminderScheduler:
+class Scheduler:
     def __init__(self, db: Database, openai_handler: OpenAIHandler):
         self.db = db
         self.openai = openai_handler

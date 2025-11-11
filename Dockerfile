@@ -3,26 +3,26 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Upgrade pip first to support extras syntax
+# Upgrade pip to latest
 RUN pip install --upgrade pip setuptools wheel
 
-# Copy requirements
+# Copy requirements first (for Docker caching)
 COPY requirements.txt .
 
-# --- CRITICAL FIX ---
-# Force install httpx[http2] FIRST so h2, hpack, hyperframe are in place
-RUN pip install --no-cache-dir "httpx[http2]==0.27.0"
+# --- FIX ---
+# Install httpx[http2]==0.24.1 first to ensure h2/hpack/hyperframe are present
+RUN pip install --no-cache-dir "httpx[http2]==0.24.1"
 
-# Then install all other dependencies
+# Then install everything else
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the source code
+# Copy the full app
 COPY . .
 
 # Expose port for Render
 EXPOSE 8000
 
-# Start Gunicorn
+# Start the Gunicorn server
 CMD ["gunicorn", "-k", "gevent", "-w", "1", "-b", "0.0.0.0:8000", "app:app"]
 
 

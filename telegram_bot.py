@@ -38,7 +38,7 @@ class TelegramBot:
         self.application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
         self._register_handlers()
 
-    async def initialize(self) -> None:
+        async def initialize(self) -> None:
         """Initialize the Telegram bot and ensure updates are processed via webhook."""
         await self.application.initialize()
 
@@ -46,19 +46,17 @@ class TelegramBot:
         webhook_url = f"{base_url}/webhook"
 
         try:
+            # Delete any old webhook (Bolt, old Render) before setting the new one
             await self.application.bot.delete_webhook()
             await self.application.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
             _logger.info(f"✅ Telegram webhook set to: {webhook_url}")
         except Exception as exc:
             _logger.warning(f"⚠️ Failed to set Telegram webhook: {exc}")
 
-        # Start the application and its background event loop
+        # Start the bot — webhook will handle updates via Flask
         await self.application.start()
+        _logger.info("🤖 Telegram bot ready for webhook updates only.")
 
-        import asyncio
-        asyncio.create_task(self.application.updater.start_polling())  # 🔥 start dispatcher loop manually
-
-        _logger.info("🤖 Telegram bot fully running and processing updates.")
 
 
 

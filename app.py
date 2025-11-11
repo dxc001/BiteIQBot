@@ -3,6 +3,8 @@ import logging
 import os
 import threading
 from flask import Flask, jsonify, request
+from telegram import Update
+
 
 from database import SupabaseDB
 from openai_handler import OpenAIHandler

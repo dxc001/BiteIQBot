@@ -1,43 +1,29 @@
-# ===============================
-# BiteIQBot — Stable Render Build
-# ===============================
-
-FROM python:3.11-bullseye
-
-# Prevent Python from writing .pyc files & buffering logs
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+# Use official Python image
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y git build-essential && rm -rf /var/lib/apt/lists/*
+# Upgrade pip first to support extras syntax
+RUN pip install --upgrade pip setuptools wheel
 
-# Copy dependencies list
+# Copy requirements
 COPY requirements.txt .
 
-# Install all Python dependencies with fallback resolver
-RUN pip install --upgrade pip setuptools wheel && \
-    pip install --use-deprecated=legacy-resolver --no-cache-dir \
-        Flask \
-        APScheduler \
-        gunicorn \
-        gevent \
-        stripe \
-        openai \
-        python-dotenv \
-        python-telegram-bot==20.7 \
-        supabase==2.3.0 \
-        httpx && \
-    pip freeze > requirements.lock
+# --- CRITICAL FIX ---
+# Force install httpx[http2] FIRST so h2, hpack, hyperframe are in place
+RUN pip install --no-cache-dir "httpx[http2]==0.27.0"
 
-# Copy your project files
+# Then install all other dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the source code
 COPY . .
 
-# Expose Flask / Gunicorn port
+# Expose port for Render
 EXPOSE 8000
 
-# Start the unified Flask + Telegram + Scheduler app
+# Start Gunicorn
 CMD ["gunicorn", "-k", "gevent", "-w", "1", "-b", "0.0.0.0:8000", "app:app"]
+
 
 

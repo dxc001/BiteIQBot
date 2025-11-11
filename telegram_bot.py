@@ -38,15 +38,13 @@ class TelegramBot:
         self.application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
         self._register_handlers()
 
-        async def initialize(self) -> None:
-        """Initialize the Telegram bot, enforce webhook to Render URL."""
+            async def initialize(self) -> None:
+        """Initialize the Telegram bot and ensure updates are processed via webhook."""
         await self.application.initialize()
 
-        # Dynamically build Render URL
         base_url = os.getenv("RENDER_EXTERNAL_URL", "https://biteiqbot-docker.onrender.com").rstrip("/")
         webhook_url = f"{base_url}/webhook"
 
-        # Reclaim webhook
         try:
             await self.application.bot.delete_webhook()
             await self.application.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
@@ -54,10 +52,14 @@ class TelegramBot:
         except Exception as exc:
             _logger.warning(f"⚠️ Failed to set Telegram webhook: {exc}")
 
-        # Start application and background loop for processing
+        # Start the application and its background event loop
         await self.application.start()
-        self.application.create_task(self.application.run_async())  # 👈 you’ll remove this line
+
+        import asyncio
+        asyncio.create_task(self.application.updater.start_polling())  # 🔥 start dispatcher loop manually
+
         _logger.info("🤖 Telegram bot fully running and processing updates.")
+
 
     async def process_update(self, update: Update) -> None:
         await self.application.process_update(update)

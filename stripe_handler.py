@@ -1,103 +1,64 @@
+from typing import Any, Dict
+
+from flask import jsonify
 import stripe
-from config import STRIPE_SECRET_KEY, STRIPE_PRICE_ID, WEBHOOK_URL
+
+from config import STRIPE_PRICE_ID, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, WEBHOOK_URL
 from database import SupabaseDB
-from datetime import datetime
-from typing import Dict, Any
 
 stripe.api_key = STRIPE_SECRET_KEY
 
+
 class StripeHandler:
     def __init__(self, db: SupabaseDB):
+        if not STRIPE_SECRET_KEY:
+            raise ValueError("STRIPE_SECRET_KEY must be configured.")
+        if not STRIPE_WEBHOOK_SECRET:
+            raise ValueError("STRIPE_WEBHOOK_SECRET must be configured.")
         self.db = db
 
     def create_checkout_session(self, telegram_id: int) -> str:
-        user = self.db.get_or_create_user(telegram_id)
-
-        try:
-            checkout_session = stripe.checkout.Session.create(
-                payment_method_types=['card'],
-                line_items=[{
-                    'price': STRIPE_PRICE_ID,
-                    'quantity': 1,
-                }],
-                mode='subscription',
-                success_url=f'{WEBHOOK_URL}/payment-success?session_id={{CHECKOUT_SESSION_ID}}',
-                cancel_url=f'{WEBHOOK_URL}/payment-cancelled',
-                client_reference_id=str(telegram_id),
-                metadata={
-                    'telegram_id': str(telegram_id)
-                }
-            )
-            return checkout_session.url
-        except Exception as e:
-            raise Exception(f"Failed to create checkout session: {str(e)}")
-
-    def handle_checkout_completed(self, session: Dict[str, Any]) -> None:
-        telegram_id = int(session.get('client_reference_id') or session.get('metadata', {}).get('telegram_id'))
-
-        subscription_id = session.get('subscription')
-        customer_id = session.get('customer')
-
-        if subscription_id:
-            subscription = stripe.Subscription.retrieve(subscription_id)
-            period_end = datetime.fromtimestamp(subscription.current_period_end)
-
-            self.db.create_subscription(
-                telegram_id=telegram_id,
-                stripe_customer_id=customer_id,
-                stripe_subscription_id=subscription_id,
-                status=subscription.status,
-                current_period_end=period_end
-            )
-
-    def handle_subscription_updated(self, subscription: Dict[str, Any]) -> None:
-        subscription_id = subscription['id']
-        status = subscription['status']
-        period_end = datetime.fromtimestamp(subscription['current_period_end'])
-
-        self.db.update_subscription_status(
-            stripe_subscription_id=subscription_id,
-            status=status,
-            current_period_end=period_end
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=[{"price": STRIPE_PRICE_ID, "quantity": 1}],
+            mode="subscription",
+            success_url=f"{WEBHOOK_URL}/payment-success?session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{WEBHOOK_URL}/payment-cancelled",
+            client_reference_id=str(telegram_id),
+            metadata={"telegram_id": str(telegram_id), "price_id": STRIPE_PRICE_ID},
         )
+        return session.url
 
-    def handle_subscription_deleted(self, subscription: Dict[str, Any]) -> None:
-        subscription_id = subscription['id']
-        self.db.update_subscription_status(
-            stripe_subscription_id=subscription_id,
-            status='cancelled'
-        )
-
-    def handle_invoice_payment_failed(self, invoice: Dict[str, Any]) -> None:
-        subscription_id = invoice.get('subscription')
-        if subscription_id:
-            self.db.update_subscription_status(
-                stripe_subscription_id=subscription_id,
-                status='past_due'
-            )
-
-    def handle_webhook_event(self, payload: bytes, signature: str) -> Dict[str, Any]:
-        from config import STRIPE_WEBHOOK_SECRET
-
+    def handle_webhook_event(self, payload: bytes, signature: str):  # Flask response tuple
         try:
-            event = stripe.Webhook.construct_event(
-                payload, signature, STRIPE_WEBHOOK_SECRET
+            event = stripe.Webhook.construct_event(payload, signature, STRIPE_WEBHOOK_SECRET)
+        except Exception as exc:  # pragma: no cover - handled via HTTP status
+            return jsonify({"error": str(exc)}), 400
+
+        event_type = event.get("type")
+        data_object: Dict[str, Any] = event.get("data", {}).get("object", {})
+
+        if event_type == "checkout.session.completed":
+            telegram_id = int(
+                data_object.get("client_reference_id")
+                or data_object.get("metadata", {}).get("telegram_id", 0)
             )
-        except ValueError:
-            raise ValueError("Invalid payload")
-        except stripe.error.SignatureVerificationError:
-            raise ValueError("Invalid signature")
+            customer_id = data_object.get("customer")
+            subscription_id = data_object.get("subscription")
+            price_id = data_object.get("metadata", {}).get("price_id")
+            status = data_object.get("status", "active")
+            if telegram_id and customer_id and subscription_id:
+                self.db.create_subscription(
+                    telegram_id=telegram_id,
+                    customer_id=customer_id,
+                    sub_id=subscription_id,
+                    price_id=price_id or "unknown",
+                    status=status,
+                )
+        elif event_type in {"customer.subscription.updated", "customer.subscription.deleted"}:
+            subscription_id = data_object.get("id")
+            status = data_object.get("status", "canceled")
+            if subscription_id:
+                self.db.update_subscription_status(subscription_id, status)
 
-        event_type = event['type']
-        data = event['data']['object']
-
-        if event_type == 'checkout.session.completed':
-            self.handle_checkout_completed(data)
-        elif event_type == 'customer.subscription.updated':
-            self.handle_subscription_updated(data)
-        elif event_type == 'customer.subscription.deleted':
-            self.handle_subscription_deleted(data)
-        elif event_type == 'invoice.payment_failed':
-            self.handle_invoice_payment_failed(data)
-
-        return {'status': 'success', 'event_type': event_type}
+        return jsonify({"status": "success"}), 200

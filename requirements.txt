@@ -1,15 +1,13 @@
-Flask==3.1.2
-python-telegram-bot==20.6
-supabase==2.0.3
-stripe==8.10.0
-openai==1.55.3
-APScheduler==3.10.4
-gunicorn==21.2.0
-gevent==24.2.1
-python-dotenv==1.0.1
-httpx==0.25.0
-anyio==4.4.0
-pydantic==2.12.3
+Flask
+python-telegram-bot
+supabase
+stripe
+openai
+APScheduler
+gunicorn
+gevent
+python-dotenv
+
 
 
 

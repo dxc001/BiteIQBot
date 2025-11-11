@@ -138,6 +138,7 @@ class TelegramBot:
             await self._send_text(update, "Unable to start checkout right now. Please try later.")
 
     async def _tomorrow(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+            _logger.info(f"👤 Received /start from user {update.effective_user.id}")
         user = self.db.get_user(update.effective_user.id)
         if not user:
             await self._send_text(update, "Please send /start to set up your profile first.")

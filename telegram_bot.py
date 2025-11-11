@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -12,7 +13,7 @@ from telegram.ext import (
 )
 from telegram.helpers import escape_markdown
 
-from config import TELEGRAM_BOT_TOKEN, WEBHOOK_URL
+from config import TELEGRAM_BOT_TOKEN
 from database import SupabaseDB
 from openai_handler import OpenAIHandler
 from stripe_handler import StripeHandler
@@ -38,16 +39,24 @@ class TelegramBot:
         self._register_handlers()
 
     async def initialize(self) -> None:
+        """Initialize the Telegram bot, enforce webhook to Render URL."""
         await self.application.initialize()
-        if WEBHOOK_URL and "example.com" not in WEBHOOK_URL:
-            try:
-                await self.application.bot.set_webhook(
-                    url=f"{WEBHOOK_URL.rstrip('/')}/webhook",
-                    drop_pending_updates=True,
-                )
-            except Exception as exc:
-                _logger.warning("Failed to set Telegram webhook: %s", exc)
+
+        # 1️⃣ Dynamically build Render URL
+        base_url = os.getenv("RENDER_EXTERNAL_URL", "https://biteiqbot-docker.onrender.com").rstrip("/")
+        webhook_url = f"{base_url}/webhook"
+
+        # 2️⃣ Reclaim webhook (delete any old Bolt one)
+        try:
+            await self.application.bot.delete_webhook()
+            await self.application.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
+            _logger.info(f"✅ Telegram webhook set to: {webhook_url}")
+        except Exception as exc:
+            _logger.warning(f"⚠️ Failed to set Telegram webhook: {exc}")
+
+        # 3️⃣ Start bot application
         await self.application.start()
+        _logger.info("🤖 Telegram bot started and ready.")
 
     async def process_update(self, update: Update) -> None:
         await self.application.process_update(update)
@@ -126,10 +135,7 @@ class TelegramBot:
             await self._send_text(update, f"💳 Subscribe here: {checkout_url}")
         except Exception as exc:
             _logger.exception("Checkout session creation failed: %s", exc)
-            await self._send_text(
-                update,
-                "Unable to start checkout right now. Please try later.",
-            )
+            await self._send_text(update, "Unable to start checkout right now. Please try later.")
 
     async def _tomorrow(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         user = self.db.get_user(update.effective_user.id)
@@ -144,10 +150,7 @@ class TelegramBot:
             await self._send_text(update, text, parse_mode="MarkdownV2")
         except Exception as exc:
             _logger.exception("Failed to prepare tomorrow plan: %s", exc)
-            await self._send_text(
-                update,
-                "Couldn't prepare a plan right now. Please try later.",
-            )
+            await self._send_text(update, "Couldn't prepare a plan right now. Please try later.")
 
     async def _button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -167,10 +170,7 @@ class TelegramBot:
         text = update.message.text or ""
         parts = [item.strip() for item in text.replace("\n", ",").split(",") if item.strip()]
         if len(parts) < 8:
-            await self._send_text(
-                update,
-                "Please send all 8 profile details as described in /start.",
-            )
+            await self._send_text(update, "Please send all 8 profile details as described in /start.")
             return
 
         try:
@@ -197,10 +197,7 @@ class TelegramBot:
             await self._send_text(update, text_plan, parse_mode="MarkdownV2")
         except Exception as exc:
             _logger.exception("Profile handling failed: %s", exc)
-            await self._send_text(
-                update,
-                "Something went wrong while updating your profile.",
-            )
+            await self._send_text(update, "Something went wrong while updating your profile.")
 
     def _format_plan_text(self, name: str, plan: Dict[str, Any], title: str) -> str:
         lines: List[str] = [f"*{_md(title)}* for {_md(name)}\n"]

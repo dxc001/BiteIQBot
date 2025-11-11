@@ -21,7 +21,7 @@ _stripe_handler = StripeHandler(_db)
 _telegram_bot = TelegramBot(_db, _openai_handler, _stripe_handler)
 _scheduler = Scheduler(_db, _openai_handler, _telegram_bot)
 
-# --- Initialize everything asynchronously in background threads ---
+
 def background_startup():
     """Start Telegram bot and scheduler in background."""
     try:
@@ -37,17 +37,15 @@ def background_startup():
         logger.exception("❌ Scheduler failed: %s", exc)
 
 
-@app.before_first_request
-def startup():
-    """Start background services after Flask has bound its port."""
-    logger.info("🚀 Starting background services...")
-    threading.Thread(target=background_startup, daemon=True).start()
-
-
 # --- ROUTES ---
 @app.route("/", methods=["GET"])
 def index():
     """Health check for Render + manual check."""
+    # if background not started yet, start it here lazily
+    if not any(t.name == "startup-thread" for t in threading.enumerate()):
+        logger.info("🚀 Launching background services lazily...")
+        threading.Thread(target=background_startup, daemon=True, name="startup-thread").start()
+
     return jsonify({
         "status": "ok",
         "service": "BiteIQBot",
@@ -78,7 +76,10 @@ def stripe_webhook():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     logger.info(f"🌍 Starting Flask app on port {port}")
+    # Start background thread immediately when running directly
+    threading.Thread(target=background_startup, daemon=True, name="startup-thread").start()
     app.run(host="0.0.0.0", port=port)
+
 
 
 

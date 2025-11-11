@@ -38,7 +38,7 @@ def _bootstrap_once() -> None:
         logger.exception("❌ Supabase connection failed: %s", exc)
         raise
 
-    # --- Telegram bot (basic init) ---
+    # --- Telegram bot ---
     try:
         asyncio.run(_telegram_bot.initialize())
         logger.info("🤖 Telegram bot initialized successfully")
@@ -61,21 +61,29 @@ def _bootstrap_once() -> None:
 _bootstrap_once()
 
 
-@app.get("/")
+@app.route("/", methods=["GET"])
 def index():
-    """Health check for Render & browser."""
-    return jsonify({"status": "ok", "service": "BiteIQBot", "webhook": True})
+    """Render health check for Render & browser."""
+    return jsonify({
+        "status": "ok",
+        "service": "BiteIQBot",
+        "webhook": True
+    }), 200
 
 
-@app.post("/webhook")
+@app.route("/webhook", methods=["POST"])
 def telegram_webhook():
     """Telegram webhook endpoint."""
-    data = request.get_json(force=True)
-    asyncio.run(_telegram_bot.process_update_json(data))
-    return jsonify({"ok": True})
+    try:
+        data = request.get_json(force=True)
+        asyncio.run(_telegram_bot.process_update_json(data))
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        logging.exception("Error processing Telegram webhook: %s", e)
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
-@app.post("/stripe-webhook")
+@app.route("/stripe-webhook", methods=["POST"])
 def stripe_webhook():
     """Stripe webhook endpoint."""
     payload = request.data

@@ -54,11 +54,10 @@ class TelegramBot:
         except Exception as exc:
             _logger.warning(f"⚠️ Failed to set Telegram webhook: {exc}")
 
-        # 3️⃣ Start bot application
-await self.application.start()
-self.application.create_task(self.application.run_async())
-_logger.info("🤖 Telegram bot fully running and processing updates.")
-
+  # Start application and background loop for processing
+        await self.application.start()
+        self.application.create_task(self.application.run_async())  # 👈 important
+        _logger.info("🤖 Telegram bot fully running and processing updates.")
 
     async def process_update(self, update: Update) -> None:
         await self.application.process_update(update)

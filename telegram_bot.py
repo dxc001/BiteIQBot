@@ -97,15 +97,16 @@ class TelegramBot:
             )
 
     async def _start(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
-        user = update.effective_user
-        self.db.get_or_create_user(user.id, user.username)
-        welcome = (
-            "👋 *Welcome to BiteIQBot — your smart nutrition coach!* 🥗\n\n"
-            "Send your profile details in 8 parts (comma or newline separated):\n"
-            "1. Name\n2. Age\n3. Gender (M/F)\n4. Height (cm)\n5. Weight (kg)\n"
-            "6. Activity (low/medium/high)\n7. Dietary preferences\n8. Goal weight (kg)"
-        )
-        await self._send_text(update, welcome, parse_mode="MarkdownV2")
+    _logger.info(f"👤 Received /start from user {update.effective_user.id}")
+    user = update.effective_user
+    self.db.get_or_create_user(user.id, user.username)
+    welcome = (
+        "👋 *Welcome to BiteIQBot — your smart nutrition coach!* 🥗\n\n"
+        "Send your profile details in 8 parts (comma or newline separated):\n"
+        "1. Name\n2. Age\n3. Gender (M/F)\n4. Height (cm)\n5. Weight (kg)\n"
+        "6. Activity (low/medium/high)\n7. Dietary preferences\n8. Goal weight (kg)"
+    )
+    await self._send_text(update, welcome, parse_mode="MarkdownV2")
 
     async def _menu(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         keyboard = [
@@ -138,7 +139,6 @@ class TelegramBot:
             await self._send_text(update, "Unable to start checkout right now. Please try later.")
 
     async def _tomorrow(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
-            _logger.info(f"👤 Received /start from user {update.effective_user.id}")
         user = self.db.get_user(update.effective_user.id)
         if not user:
             await self._send_text(update, "Please send /start to set up your profile first.")

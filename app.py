@@ -55,20 +55,19 @@ def index():
 
 @app.route("/webhook", methods=["POST"])
 def telegram_webhook():
-    """Handle Telegram webhook safely inside existing event loop."""
+    """Handle Telegram webhook safely inside Flask event loop."""
+    data = request.get_json(force=True)
     try:
-        data = request.get_json(force=True)
-
-        # 👇 Add this line — it prints every incoming Telegram update to Render logs
-        logger.info(f"📩 Incoming Telegram update: {data}")
-
         loop = asyncio.get_event_loop()
-        # Schedule coroutine without blocking Flask
-        loop.create_task(_telegram_bot.process_update_json(data))
+        if loop.is_running():
+            loop.create_task(_telegram_bot.process_update_json(data))
+        else:
+            loop.run_until_complete(_telegram_bot.process_update_json(data))
         return jsonify({"ok": True}), 200
     except Exception as e:
         logger.exception("❌ Telegram webhook error: %s", e)
         return jsonify({"ok": False, "error": str(e)}), 500
+
 
 
 @app.route("/stripe-webhook", methods=["POST"])

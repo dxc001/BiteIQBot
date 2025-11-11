@@ -39,9 +39,8 @@ class TelegramBot:
         self._register_handlers()
 
     async def initialize(self) -> None:
-        """Initialize the Telegram bot and ensure updates are processed via webhook."""
+        """Initialize Telegram bot, configure webhook for Flask server."""
         await self.application.initialize()
-
         base_url = os.getenv("RENDER_EXTERNAL_URL", "https://biteiqbot-docker.onrender.com").rstrip("/")
         webhook_url = f"{base_url}/webhook"
 
@@ -58,12 +57,14 @@ class TelegramBot:
         except Exception as exc:
             _logger.error(f"❌ Error starting Telegram bot: {exc}")
 
-    async def process_update(self, update: Update) -> None:
-        await self.application.process_update(update)
-
     async def process_update_json(self, data: Dict[str, Any]) -> None:
-        update = Update.de_json(data, self.application.bot)
-        await self.process_update(update)
+        """Process webhook update in Flask context safely."""
+        try:
+            update = Update.de_json(data, self.application.bot)
+            await self.application.process_update(update)
+            _logger.info(f"✅ Processed Telegram update: {update.message.text if update.message else 'callback'}")
+        except Exception as exc:
+            _logger.exception(f"❌ Failed to process Telegram update: {exc}")
 
     def _register_handlers(self) -> None:
         self.application.add_handler(CommandHandler("start", self._start))
@@ -82,22 +83,20 @@ class TelegramBot:
         parse_mode: Optional[str] = None,
         reply_markup: Optional[InlineKeyboardMarkup] = None,
     ) -> None:
-        chat = update.effective_chat
-        if chat:
-            await chat.send_message(
-                text=text,
-                parse_mode=parse_mode,
-                reply_markup=reply_markup,
-            )
-        elif update.callback_query and update.callback_query.message:
-            await update.callback_query.message.reply_text(
-                text,
-                parse_mode=parse_mode,
-                reply_markup=reply_markup,
-            )
+        try:
+            if update.effective_chat:
+                await update.effective_chat.send_message(
+                    text=text, parse_mode=parse_mode, reply_markup=reply_markup
+                )
+            elif update.callback_query and update.callback_query.message:
+                await update.callback_query.message.reply_text(
+                    text, parse_mode=parse_mode, reply_markup=reply_markup
+                )
+        except Exception as exc:
+            _logger.exception(f"❌ Failed to send message: {exc}")
 
     async def _start(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
-        _logger.info(f"👤 Received /start from user {update.effective_user.id}")
+        _logger.info(f"👤 /start from user {update.effective_user.id}")
         user = update.effective_user
         self.db.get_or_create_user(user.id, user.username)
         welcome = (
@@ -216,4 +215,5 @@ class TelegramBot:
         if plan.get("tip"):
             lines.append(f"💡 Tip: {_md(plan['tip'])}")
         return "\n".join(lines).strip()
+
 

@@ -39,32 +39,24 @@ class TelegramBot:
         self._register_handlers()
 
     async def initialize(self) -> None:
-    """Initialize the Telegram bot and ensure updates are processed via webhook."""
-    await self.application.initialize()
+        """Initialize the Telegram bot and ensure updates are processed via webhook."""
+        await self.application.initialize()
 
-    base_url = os.getenv("RENDER_EXTERNAL_URL", "https://biteiqbot-docker.onrender.com").rstrip("/")
-    webhook_url = f"{base_url}/webhook"
+        base_url = os.getenv("RENDER_EXTERNAL_URL", "https://biteiqbot-docker.onrender.com").rstrip("/")
+        webhook_url = f"{base_url}/webhook"
 
-    try:
-        await self.application.bot.delete_webhook()
-        await self.application.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
-        _logger.info(f"✅ Telegram webhook set to: {webhook_url}")
-    except Exception as exc:
-        _logger.warning(f"⚠️ Failed to set Telegram webhook: {exc}")
+        try:
+            await self.application.bot.delete_webhook()
+            await self.application.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
+            _logger.info(f"✅ Telegram webhook set to: {webhook_url}")
+        except Exception as exc:
+            _logger.warning(f"⚠️ Failed to set Telegram webhook: {exc}")
 
-    # ✅ Start the application properly in the same loop
-    try:
-        await self.application.start()
-        await self.application.updater.start_polling()  # make handlers live
-        _logger.info("🤖 Telegram bot ready and accepting messages.")
-    except Exception as exc:
-        _logger.error(f"❌ Error starting Telegram application: {exc}")
-
-
-
-
-
-
+        try:
+            await self.application.start()
+            _logger.info("🤖 Telegram bot started successfully.")
+        except Exception as exc:
+            _logger.error(f"❌ Error starting Telegram bot: {exc}")
 
     async def process_update(self, update: Update) -> None:
         await self.application.process_update(update)
@@ -72,7 +64,6 @@ class TelegramBot:
     async def process_update_json(self, data: Dict[str, Any]) -> None:
         update = Update.de_json(data, self.application.bot)
         await self.process_update(update)
-
 
     def _register_handlers(self) -> None:
         self.application.add_handler(CommandHandler("start", self._start))
@@ -116,7 +107,6 @@ class TelegramBot:
             "6. Activity (low/medium/high)\n7. Dietary preferences\n8. Goal weight (kg)"
         )
         await self._send_text(update, welcome, parse_mode="MarkdownV2")
-
 
     async def _menu(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         keyboard = [
@@ -226,3 +216,4 @@ class TelegramBot:
         if plan.get("tip"):
             lines.append(f"💡 Tip: {_md(plan['tip'])}")
         return "\n".join(lines).strip()
+

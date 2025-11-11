@@ -55,23 +55,31 @@ def index():
     }), 200
 
 
+from telegram import Update
+
 @app.route("/webhook", methods=["POST"])
 def telegram_webhook():
-    """Handle Telegram webhook (PTB v20+, Flask safe)."""
+    """Handle Telegram webhook."""
     data = request.get_json(force=True)
+
     try:
-        # Convert JSON to Update instance
+        # Convert raw JSON to Telegram Update
         update = Update.de_json(data, _telegram_bot.application.bot)
 
-        # Submit update to the Application’s built-in queue
-        _telegram_bot.application.update_queue.put_nowait(update)
+        # Schedule async processing safely
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task(_telegram_bot.application.process_update(update))
+        else:
+            asyncio.run(_telegram_bot.application.process_update(update))
 
-        logger.info(f"📨 Queued Telegram update: {update.effective_message.text if update.effective_message else 'N/A'}")
+        logger.info(f"✅ Processed Telegram update: {update.effective_message.text if update.effective_message else 'no message'}")
         return jsonify({"ok": True}), 200
 
     except Exception as e:
         logger.exception("❌ Telegram webhook error: %s", e)
         return jsonify({"ok": False, "error": str(e)}), 500
+
 
 
 

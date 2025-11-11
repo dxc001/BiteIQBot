@@ -185,3 +185,34 @@ For issues:
 2. Verify all environment variables are set
 3. Test each API key independently
 4. Review Stripe and Telegram webhook logs
+
+## Verification Checklist
+
+After configuring the environment variables locally you can verify that the stack is healthy with the following commands:
+
+```bash
+python app.py
+```
+
+The startup log should include:
+
+- `✅ Supabase connection established`
+- `🤖 Telegram bot initialized successfully`
+- `🕒 Scheduler started`
+- `🌐 Flask server ready (gunicorn app:app)`
+
+With the dev server still running in another terminal, run:
+
+```bash
+curl -s http://localhost:5000/
+curl -s -X POST http://localhost:5000/webhook -H "Content-Type: application/json" -d '{}'
+curl -s -X POST http://localhost:5000/stripe-webhook -H "Content-Type: application/json" -d '{}'
+```
+
+Each command should return an HTTP 200 response. For production validation, Render will invoke:
+
+```bash
+gunicorn app:app --bind 0.0.0.0:8000
+```
+
+Ensure no errors are printed during that startup phase.

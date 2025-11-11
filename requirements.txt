@@ -8,7 +8,8 @@ gevent
 python-dotenv
 httpx[http2]==0.24.1
 httpcore<0.18.0
-supabase==1.0.3
+supabase==1.2.0
+
 
 
 

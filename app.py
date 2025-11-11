@@ -55,18 +55,25 @@ def index():
 
 @app.route("/webhook", methods=["POST"])
 def telegram_webhook():
-    """Handle Telegram webhook using the bot's own asyncio loop."""
+    """Handle Telegram webhook in Flask safely (for PTB v20+)."""
     data = request.get_json(force=True)
     try:
-        # Use the same loop the Telegram Application is running on
-        loop = _telegram_bot.application.loop
-        loop.create_task(_telegram_bot.process_update_json(data))
-        logger.info(f"✅ Queued Telegram update: {data.get('message', {}).get('text', '')}")
+        # Ensure we have a running event loop (or create one)
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # If Flask/gevent already running, schedule async task safely
+            asyncio.ensure_future(_telegram_bot.process_update_json(data))
+        else:
+            # Otherwise, run it immediately
+            loop.run_until_complete(_telegram_bot.process_update_json(data))
+
+        logger.info(f"✅ Processed Telegram update: {data.get('message', {}).get('text', '')}")
         return jsonify({"ok": True}), 200
 
     except Exception as e:
         logger.exception("❌ Telegram webhook error: %s", e)
         return jsonify({"ok": False, "error": str(e)}), 500
+
 
 
 

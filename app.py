@@ -5,7 +5,6 @@ import threading
 from flask import Flask, jsonify, request
 from telegram import Update
 
-
 from database import SupabaseDB
 from openai_handler import OpenAIHandler
 from scheduler import Scheduler
@@ -43,7 +42,6 @@ def background_startup():
 @app.route("/", methods=["GET"])
 def index():
     """Health check for Render + manual check."""
-    # if background not started yet, start it here lazily
     if not any(t.name == "startup-thread" for t in threading.enumerate()):
         logger.info("🚀 Launching background services lazily...")
         threading.Thread(target=background_startup, daemon=True, name="startup-thread").start()
@@ -55,21 +53,18 @@ def index():
     }), 200
 
 
-from telegram import Update
-
 @app.route("/webhook", methods=["POST"])
 def telegram_webhook():
     """Handle Telegram webhook."""
     data = request.get_json(force=True)
 
     try:
-        # Convert raw JSON to Telegram Update
         update = Update.de_json(data, _telegram_bot.application.bot)
 
-        # Schedule async processing safely
+        # ✅ Safe async dispatch
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            loop.create_task(_telegram_bot.application.process_update(update))
+            asyncio.ensure_future(_telegram_bot.application.process_update(update))
         else:
             asyncio.run(_telegram_bot.application.process_update(update))
 
@@ -79,12 +74,6 @@ def telegram_webhook():
     except Exception as e:
         logger.exception("❌ Telegram webhook error: %s", e)
         return jsonify({"ok": False, "error": str(e)}), 500
-
-
-
-
-
-
 
 
 @app.route("/stripe-webhook", methods=["POST"])
@@ -98,10 +87,5 @@ def stripe_webhook():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     logger.info(f"🌍 Starting Flask app on port {port}")
-    # Start background thread immediately when running directly
     threading.Thread(target=background_startup, daemon=True, name="startup-thread").start()
     app.run(host="0.0.0.0", port=port)
-
-
-
-

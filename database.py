@@ -1,244 +1,224 @@
-from supabase import create_client, Client
-from typing import Optional, Dict, Any, List
-from datetime import datetime, date, timedelta
-from config import SUPABASE_URL, SUPABASE_SERVICE_KEY
 import json
 import logging
+import os
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
 import httpx
+from supabase import Client, create_client
 
-# 🧩 Patch for Supabase + httpx proxy bug (Render-safe)
-_original_client_init = httpx.Client.__init__
-def _safe_init(self, *args, **kwargs):
+SUPABASE_URL = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+
+_logger = logging.getLogger(__name__)
+
+
+# Render occasionally injects a proxy argument that breaks httpx; guard against it.
+_original_httpx_client_init = httpx.Client.__init__
+
+
+def _safe_httpx_init(self, *args, **kwargs):
     kwargs.pop("proxy", None)
-    return _original_client_init(self, *args, **kwargs)
-httpx.Client.__init__ = _safe_init
+    return _original_httpx_client_init(self, *args, **kwargs)
 
-logger = logging.getLogger(__name__)
+
+httpx.Client.__init__ = _safe_httpx_init
 
 
 class SupabaseDB:
-    def __init__(self):
+    def __init__(self) -> None:
         if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-            raise ValueError("❌ Missing SUPABASE_URL or SUPABASE_SERVICE_KEY in environment variables.")
+            raise ValueError(
+                "SUPABASE_URL/VITE_SUPABASE_URL and SUPABASE_SERVICE_KEY must be set."
+            )
+
         self.client: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
-        logger.info("✅ Connected to Supabase successfully")
 
-    # ------------------ User Management ------------------ #
-    def get_or_create_user(self, telegram_id: int, username: str = None, first_name: str = None) -> Dict[str, Any]:
-        """Retrieve user or create a new one if missing."""
-        try:
-            response = (
-                self.client.table('users')
-                .select('*')
-                .eq('telegram_id', telegram_id)
-                .maybe_single()
-                .execute()
-            )
+    # ------------------------------------------------------------------
+    # Connection helpers
+    # ------------------------------------------------------------------
+    def check_connection(self) -> None:
+        self.client.table("users").select("id").limit(1).execute()
 
-            if not response or not getattr(response, "data", None):
-                logger.warning(f"⚠️ No user found for telegram_id={telegram_id}, creating one...")
-                new_user = {
-                    'telegram_id': telegram_id,
-                    'username': username,
-                    'first_name': first_name,
-                    'created_at': datetime.now().isoformat(),
-                    'last_active': datetime.now().isoformat(),
-                    'reminders': False
-                }
-                insert_response = self.client.table('users').insert(new_user).execute()
-                logger.info(f"✅ Created new user for Telegram ID {telegram_id}")
-                return insert_response.data[0] if insert_response and insert_response.data else new_user
-
-            # ✅ Update last_active timestamp for existing user
-            self.client.table('users').update({
-                'last_active': datetime.now().isoformat()
-            }).eq('telegram_id', telegram_id).execute()
-
-            return response.data
-
-        except Exception as e:
-            logger.error(f"❌ Error in get_or_create_user: {e}")
-            return {}
-
-    def get_user(self, telegram_id: int) -> Optional[Dict[str, Any]]:
-        """Get user profile by Telegram ID."""
-        try:
-            response = (
-                self.client.table('users')
-                .select('*')
-                .eq('telegram_id', telegram_id)
-                .maybe_single()
-                .execute()
-            )
-            return response.data
-        except Exception as e:
-            logger.error(f"❌ Error fetching user: {e}")
-            return None
-
-    # ------------------ Profile ------------------ #
-    def upsert_user_profile(self, telegram_id: int, name: str, age: int, gender: str,
-                            height_cm: float, weight_kg: float, activity: str,
-                            diet: str, goal_kg: float) -> None:
-        """Insert or update user profile data."""
-        profile_data = {
-            'name': name,
-            'age': age,
-            'gender': gender,
-            'height_cm': height_cm,
-            'weight_kg': weight_kg,
-            'activity': activity,
-            'diet': diet,
-            'goal_kg': goal_kg,
-            'last_active': datetime.now().isoformat()
-        }
-
+    # ------------------------------------------------------------------
+    # User helpers
+    # ------------------------------------------------------------------
+    def get_or_create_user(
+        self, telegram_id: int, username: Optional[str] = None
+    ) -> Dict[str, Any]:
         user = self.get_user(telegram_id)
         if user:
-            self.client.table('users').update(profile_data).eq('telegram_id', telegram_id).execute()
-        else:
-            profile_data['telegram_id'] = telegram_id
-            self.client.table('users').insert(profile_data).execute()
+            return user
+        return self.create_user(telegram_id, username)
 
-    # ------------------ Reminders ------------------ #
-    def set_reminders(self, telegram_id: int, enabled: bool) -> None:
-        """Enable or disable reminders for a user."""
-        self.client.table('users').update({'reminders': enabled}).eq('telegram_id', telegram_id).execute()
+    def get_user(self, telegram_id: int) -> Optional[Dict[str, Any]]:
+        response = (
+            self.client.table("users")
+            .select("*")
+            .eq("telegram_id", telegram_id)
+            .maybe_single()
+            .execute()
+        )
+        return response.data if getattr(response, "data", None) else None
 
-    def get_users_with_reminders(self) -> List[int]:
-        """Get Telegram IDs of all users with reminders enabled."""
-        response = self.client.table('users').select('telegram_id').eq('reminders', True).execute()
-        return [user['telegram_id'] for user in (response.data or [])]
-
-    # ------------------ Subscriptions ------------------ #
-    def has_active_subscription(self, telegram_id: int) -> bool:
-        """Check if user has an active subscription."""
-        response = self.client.rpc('has_active_subscription', {'user_telegram_id': telegram_id}).execute()
-        return bool(response.data)
-
-    def set_subscription(self, telegram_id: int, is_active: bool,
-                         customer_id: str = None, sub_id: str = None) -> None:
-        """Set or deactivate a subscription."""
-        user = self.get_user(telegram_id)
-        if not user:
-            return
-
-        if is_active and customer_id and sub_id:
-            existing = self.client.table('subscriptions').select('*').eq('user_id', user['id']).maybe_single().execute()
-            subscription_data = {
-                'user_id': user['id'],
-                'stripe_customer_id': customer_id,
-                'stripe_subscription_id': sub_id,
-                'status': 'active',
-                'updated_at': datetime.now().isoformat()
-            }
-            if existing.data:
-                self.client.table('subscriptions').update(subscription_data).eq('user_id', user['id']).execute()
-            else:
-                self.client.table('subscriptions').insert(subscription_data).execute()
-        else:
-            self.client.table('subscriptions').update({
-                'status': 'inactive',
-                'updated_at': datetime.now().isoformat()
-            }).eq('user_id', user['id']).execute()
-
-    def update_subscription_status(self, stripe_subscription_id: str,
-                                   status: str, current_period_end: datetime = None) -> None:
-        """Update subscription status by Stripe ID."""
-        update_data = {'status': status, 'updated_at': datetime.now().isoformat()}
-        if current_period_end:
-            update_data['current_period_end'] = current_period_end.isoformat()
-        self.client.table('subscriptions').update(update_data).eq('stripe_subscription_id', stripe_subscription_id).execute()
-
-    # ------------------ Meal Plans ------------------ #
-    def save_plan(self, telegram_id: int, plan_date: date, plan_json: dict) -> None:
-        """Save or update a user's daily meal plan."""
-        user = self.get_user(telegram_id)
-        if not user:
-            return
-
-        plan_data = {
-            'user_id': user['id'],
-            'plan_date': plan_date.isoformat(),
-            'plan_json': json.dumps(plan_json),
-            'updated_at': datetime.now().isoformat()
+    def create_user(
+        self, telegram_id: int, username: Optional[str] = None
+    ) -> Dict[str, Any]:
+        payload = {
+            "telegram_id": telegram_id,
+            "username": username,
+            "created_at": datetime.utcnow().isoformat(),
+            "last_active": datetime.utcnow().isoformat(),
         }
+        response = self.client.table("users").insert(payload).execute()
+        return response.data[0] if getattr(response, "data", None) else payload
 
-        self.client.table('plans').upsert(plan_data).execute()
+    def update_user(self, telegram_id: int, **fields: Any) -> None:
+        if not fields:
+            return
+        fields["last_active"] = datetime.utcnow().isoformat()
+        self.client.table("users").update(fields).eq("telegram_id", telegram_id).execute()
 
-    def get_plan(self, telegram_id: int, plan_date: date) -> Optional[dict]:
-        """Retrieve a meal plan for a specific date."""
+    def get_all_users(self) -> List[Dict[str, Any]]:
+        response = self.client.table("users").select("*").execute()
+        return response.data or []
+
+    # ------------------------------------------------------------------
+    # Meal plans / history
+    # ------------------------------------------------------------------
+    def save_plan(self, telegram_id: int, day_label: str, plan_json: Dict[str, Any]) -> None:
         user = self.get_user(telegram_id)
         if not user:
-            return None
-
-        response = self.client.table('plans').select('plan_json').eq(
-            'user_id', user['id']
-        ).eq('plan_date', plan_date.isoformat()).maybe_single().execute()
-
-        if response.data:
-            plan = response.data['plan_json']
-            return json.loads(plan) if isinstance(plan, str) else plan
-        return None
-
-    # ------------------ Meal History ------------------ #
-    def add_meals_to_history(self, telegram_id: int, meal_titles: List[str]) -> None:
-        """Record meals to avoid repetition."""
-        user = self.get_user(telegram_id)
-        if not user or not meal_titles:
             return
 
-        today = date.today().isoformat()
-        meal_records = [{'user_id': user['id'], 'meal_title': m, 'seen_on': today} for m in meal_titles if m]
-        if meal_records:
-            self.client.table('meal_history').insert(meal_records).execute()
+        payload = {
+            "user_id": user.get("id"),
+            "plan_day_label": day_label,
+            "plan_json": json.dumps(plan_json),
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+        self.client.table("plans").upsert(payload).execute()
 
-    def get_recent_meals(self, telegram_id: int, days: int = 7) -> List[str]:
-        """Retrieve recent meals (to prevent duplication)."""
+    def get_recent_meals(self, telegram_id: int, limit: int = 10) -> List[str]:
         user = self.get_user(telegram_id)
         if not user:
             return []
 
-        cutoff_date = (date.today() - timedelta(days=days)).isoformat()
-        response = self.client.table('meal_history').select('meal_title').eq(
-            'user_id', user['id']
-        ).gte('seen_on', cutoff_date).execute()
+        response = (
+            self.client.table("meal_history")
+            .select("meal_title")
+            .eq("user_id", user.get("id"))
+            .order("seen_on", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        titles = [row.get("meal_title") for row in (response.data or []) if row.get("meal_title")]
+        # dedupe while preserving order
+        seen: List[str] = []
+        for title in titles:
+            if title not in seen:
+                seen.append(title)
+        return seen
 
-        return list({m['meal_title'] for m in (response.data or [])})
+    def add_meals_to_history(self, telegram_id: int, meals: List[str]) -> None:
+        user = self.get_user(telegram_id)
+        if not user or not meals:
+            return
 
-    # ------------------ Conversations ------------------ #
+        rows = [
+            {
+                "user_id": user.get("id"),
+                "meal_title": title,
+                "seen_on": datetime.utcnow().date().isoformat(),
+            }
+            for title in meals
+            if title
+        ]
+        if rows:
+            self.client.table("meal_history").insert(rows).execute()
+
+    # ------------------------------------------------------------------
+    # Subscription helpers
+    # ------------------------------------------------------------------
+    def has_active_subscription(self, telegram_id: int) -> bool:
+        user = self.get_user(telegram_id)
+        if not user:
+            return False
+
+        response = (
+            self.client.table("subscriptions")
+            .select("status")
+            .eq("user_id", user.get("id"))
+            .eq("status", "active")
+            .limit(1)
+            .execute()
+        )
+        return bool(response.data)
+
+    def create_subscription(
+        self,
+        telegram_id: int,
+        customer_id: str,
+        sub_id: str,
+        price_id: str,
+        status: str,
+    ) -> None:
+        user = self.get_or_create_user(telegram_id)
+        payload = {
+            "user_id": user.get("id"),
+            "stripe_customer_id": customer_id,
+            "stripe_subscription_id": sub_id,
+            "stripe_price_id": price_id,
+            "status": status,
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+        self.client.table("subscriptions").upsert(payload, on_conflict="stripe_subscription_id").execute()
+
+    def update_subscription_status(self, subscription_id: str, status: str) -> None:
+        self.client.table("subscriptions").update(
+            {"status": status, "updated_at": datetime.utcnow().isoformat()}
+        ).eq("stripe_subscription_id", subscription_id).execute()
+
+    # ------------------------------------------------------------------
+    # Conversation helpers (legacy compatibility)
+    # ------------------------------------------------------------------
     def get_conversation_history(self, telegram_id: int) -> Optional[Dict[str, Any]]:
-        """Retrieve user's last conversation context."""
         user = self.get_user(telegram_id)
         if not user:
             return None
 
-        response = self.client.table('conversation_history').select('*').eq(
-            'user_id', user['id']
-        ).order('updated_at', desc=True).limit(1).maybe_single().execute()
-        return response.data
+        response = (
+            self.client.table("conversation_history")
+            .select("*")
+            .eq("user_id", user.get("id"))
+            .order("updated_at", desc=True)
+            .limit(1)
+            .maybe_single()
+            .execute()
+        )
+        return response.data if getattr(response, "data", None) else None
 
     def save_conversation_message(self, telegram_id: int, role: str, content: str) -> None:
-        """Append a message to the conversation history."""
         user = self.get_user(telegram_id)
         if not user:
             return
 
-        existing = self.get_conversation_history(telegram_id)
-        now = datetime.now().isoformat()
-
-        if existing:
-            messages = existing.get('messages', [])
-            messages.append({'role': role, 'content': content, 'timestamp': now})
-            self.client.table('conversation_history').update({
-                'messages': messages[-20:],  # keep last 20 messages
-                'updated_at': now
-            }).eq('id', existing['id']).execute()
+        history = self.get_conversation_history(telegram_id)
+        now = datetime.utcnow().isoformat()
+        if history:
+            messages = history.get("messages", [])
+            messages.append({"role": role, "content": content, "timestamp": now})
+            self.client.table("conversation_history").update(
+                {"messages": messages[-20:], "updated_at": now}
+            ).eq("id", history["id"]).execute()
         else:
-            self.client.table('conversation_history').insert({
-                'user_id': user['id'],
-                'messages': [{'role': role, 'content': content, 'timestamp': now}],
-                'updated_at': now
-            }).execute()
-# ✅ Alias for backward compatibility
-Database = SupabaseDB
+            self.client.table("conversation_history").insert(
+                {
+                    "user_id": user.get("id"),
+                    "messages": [{"role": role, "content": content, "timestamp": now}],
+                    "updated_at": now,
+                }
+            ).execute()
 
+
+Database = SupabaseDB

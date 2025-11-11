@@ -6,7 +6,9 @@ APScheduler
 gunicorn
 gevent
 python-dotenv
-httpx==0.27.0
+httpx
+supabase==2.3.0
+
 
 
 

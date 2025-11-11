@@ -39,23 +39,26 @@ class TelegramBot:
         self._register_handlers()
 
     async def initialize(self) -> None:
-        """Initialize the Telegram bot and ensure updates are processed via webhook."""
-        await self.application.initialize()
+    """Initialize the Telegram bot and ensure updates are processed via webhook."""
+    await self.application.initialize()
 
-        base_url = os.getenv("RENDER_EXTERNAL_URL", "https://biteiqbot-docker.onrender.com").rstrip("/")
-        webhook_url = f"{base_url}/webhook"
+    base_url = os.getenv("RENDER_EXTERNAL_URL", "https://biteiqbot-docker.onrender.com").rstrip("/")
+    webhook_url = f"{base_url}/webhook"
 
-        try:
-            # Delete any old webhook before setting the new one
-            await self.application.bot.delete_webhook()
-            await self.application.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
-            _logger.info(f"✅ Telegram webhook set to: {webhook_url}")
-        except Exception as exc:
-            _logger.warning(f"⚠️ Failed to set Telegram webhook: {exc}")
+    try:
+        await self.application.bot.delete_webhook()
+        await self.application.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
+        _logger.info(f"✅ Telegram webhook set to: {webhook_url}")
+    except Exception as exc:
+        _logger.warning(f"⚠️ Failed to set Telegram webhook: {exc}")
 
-        # Start the bot — webhook will handle updates via Flask
+    # ✅ Start the application properly in the same loop
+    try:
         await self.application.start()
-        _logger.info("🤖 Telegram bot ready for webhook updates only.")
+        await self.application.updater.start_polling()  # make handlers live
+        _logger.info("🤖 Telegram bot ready and accepting messages.")
+    except Exception as exc:
+        _logger.error(f"❌ Error starting Telegram application: {exc}")
 
 
 

@@ -38,7 +38,7 @@ class TelegramBot:
         self.application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
         self._register_handlers()
 
-    async def initialize(self) -> None:
+        async def initialize(self) -> None:
         """Initialize the Telegram bot, enforce webhook to Render URL."""
         await self.application.initialize()
 
@@ -56,7 +56,7 @@ class TelegramBot:
 
         # Start application and background loop for processing
         await self.application.start()
-        self.application.create_task(self.application.run_async())  # 👈 ensures updates are processed
+        self.application.create_task(self.application.run_async())  # 👈 you’ll remove this line
         _logger.info("🤖 Telegram bot fully running and processing updates.")
 
     async def process_update(self, update: Update) -> None:

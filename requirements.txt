@@ -1,12 +1,13 @@
 Flask
-python-telegram-bot
-supabase
+python-telegram-bot==20.7
 stripe
 openai
 APScheduler
 gunicorn
 gevent
 python-dotenv
+httpx==0.27.0
+
 
 
 

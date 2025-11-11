@@ -58,6 +58,10 @@ def telegram_webhook():
     """Handle Telegram webhook safely inside existing event loop."""
     try:
         data = request.get_json(force=True)
+
+        # 👇 Add this line — it prints every incoming Telegram update to Render logs
+        logger.info(f"📩 Incoming Telegram update: {data}")
+
         loop = asyncio.get_event_loop()
         # Schedule coroutine without blocking Flask
         loop.create_task(_telegram_bot.process_update_json(data))

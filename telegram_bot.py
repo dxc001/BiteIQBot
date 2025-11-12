@@ -39,34 +39,32 @@ class TelegramBot:
         self._register_handlers()
 
     async def initialize(self) -> None:
-        """Initialize Telegram bot, configure webhook for Flask server."""
+        """Initialize Telegram bot, enforce webhook to Render URL, and start dispatcher."""
         await self.application.initialize()
+
         base_url = os.getenv("RENDER_EXTERNAL_URL", "https://biteiqbot-docker.onrender.com").rstrip("/")
         webhook_url = f"{base_url}/webhook"
 
         try:
+            # Remove old webhooks
             await self.application.bot.delete_webhook()
             await self.application.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
             _logger.info(f"✅ Telegram webhook set to: {webhook_url}")
         except Exception as exc:
             _logger.warning(f"⚠️ Failed to set Telegram webhook: {exc}")
 
-        try:
-            await self.application.start()
-            _logger.info("🤖 Telegram bot started successfully.")
-        except Exception as exc:
-            _logger.error(f"❌ Error starting Telegram bot: {exc}")
+        # Start the dispatcher
+        await self.application.start()
+        await self.application.updater.start_polling()  # ensures handlers respond to webhook updates
+        _logger.info("🤖 Telegram bot fully initialized and ready.")
 
     async def process_update_json(self, data: Dict[str, Any]) -> None:
-        """Process webhook update in Flask context safely."""
-        try:
-            update = Update.de_json(data, self.application.bot)
-            await self.application.process_update(update)
-            _logger.info(f"✅ Processed Telegram update: {update.message.text if update.message else 'callback'}")
-        except Exception as exc:
-            _logger.exception(f"❌ Failed to process Telegram update: {exc}")
+        """Convert raw JSON into Telegram Update and process it."""
+        update = Update.de_json(data, self.application.bot)
+        await self.application.process_update(update)
 
     def _register_handlers(self) -> None:
+        """Register all command and message handlers."""
         self.application.add_handler(CommandHandler("start", self._start))
         self.application.add_handler(CommandHandler("menu", self._menu))
         self.application.add_handler(CommandHandler("help", self._help))
@@ -83,20 +81,25 @@ class TelegramBot:
         parse_mode: Optional[str] = None,
         reply_markup: Optional[InlineKeyboardMarkup] = None,
     ) -> None:
+        """Utility method to send text messages safely."""
+        chat = update.effective_chat
         try:
-            if update.effective_chat:
-                await update.effective_chat.send_message(
-                    text=text, parse_mode=parse_mode, reply_markup=reply_markup
-                )
+            if chat:
+                await chat.send_message(text=text, parse_mode=parse_mode, reply_markup=reply_markup)
             elif update.callback_query and update.callback_query.message:
                 await update.callback_query.message.reply_text(
-                    text, parse_mode=parse_mode, reply_markup=reply_markup
+                    text,
+                    parse_mode=parse_mode,
+                    reply_markup=reply_markup,
                 )
-        except Exception as exc:
-            _logger.exception(f"❌ Failed to send message: {exc}")
+            _logger.info(f"📤 Sent message to user {chat.id if chat else 'unknown'}")
+        except Exception as e:
+            _logger.error(f"❌ Failed to send message: {e}")
+
+    # -------------------- Command Handlers --------------------
 
     async def _start(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
-        _logger.info(f"👤 /start from user {update.effective_user.id}")
+        _logger.info(f"👤 Received /start from user {update.effective_user.id}")
         user = update.effective_user
         self.db.get_or_create_user(user.id, user.username)
         welcome = (
@@ -152,6 +155,8 @@ class TelegramBot:
             _logger.exception("Failed to prepare tomorrow plan: %s", exc)
             await self._send_text(update, "Couldn't prepare a plan right now. Please try later.")
 
+    # -------------------- Callback & Messages --------------------
+
     async def _button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
         await query.answer()
@@ -198,6 +203,8 @@ class TelegramBot:
         except Exception as exc:
             _logger.exception("Profile handling failed: %s", exc)
             await self._send_text(update, "Something went wrong while updating your profile.")
+
+    # -------------------- Utils --------------------
 
     def _format_plan_text(self, name: str, plan: Dict[str, Any], title: str) -> str:
         lines: List[str] = [f"*{_md(title)}* for {_md(name)}\n"]
